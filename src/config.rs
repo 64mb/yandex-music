@@ -1,0 +1,151 @@
+//! Настройки (config.json), папка данных приложения и лог.
+
+use serde::{Deserialize, Serialize};
+use std::io::Write;
+use std::path::PathBuf;
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct Config {
+    /// Токен OAuth в памяти. На диске лежит только зашифрованным (`token_sealed`).
+    #[serde(skip)]
+    pub token: Option<String>,
+    #[serde(skip)]
+    pub refresh_token: Option<String>,
+    /// Токены, зашифрованные DPAPI (src/secret.rs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token_sealed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_sealed: Option<String>,
+    /// Старый формат — токен открытым текстом. При запуске переводится в зашифрованный.
+    #[serde(rename = "token", skip_serializing_if = "Option::is_none")]
+    token_plain: Option<String>,
+    /// Unix-время, когда токен истечёт.
+    pub token_expires: Option<u64>,
+    pub volume: f32,
+    pub discord_enabled: bool,
+    pub discord_app_id: String,
+    /// system / light / dark
+    pub theme: String,
+    /// 0 превосходное, 1 оптимальное, 2 экономичное
+    pub quality: u8,
+    pub eq_on: bool,
+    pub eq_preset: usize,
+    pub eq_preamp: f32,
+    pub eq_gains: [f32; 10],
+    /// Язык интерфейса Яндекса: ru, en, uz, kk — уходит в Accept-Language.
+    pub lang: String,
+    pub navbar_collapsed: bool,
+    /// smooth — все анимации, lite — без анимаций и с урезанными кэшами.
+    pub mode: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            token: None,
+            refresh_token: None,
+            token_sealed: None,
+            refresh_sealed: None,
+            token_plain: None,
+            token_expires: None,
+            volume: 0.6,
+            discord_enabled: true,
+            discord_app_id: String::new(),
+            theme: "system".into(),
+            quality: 0,
+            eq_on: false,
+            eq_preset: 1,
+            eq_preamp: 1.0,
+            eq_gains: [0.0; 10],
+            lang: "ru".into(),
+            navbar_collapsed: false,
+            mode: "smooth".into(),
+        }
+    }
+}
+
+/// %APPDATA%\yamusic-rs. Папка прежнего названия (yamusic-lite, ещё раньше yawave) переносится
+/// молча, вместе с токеном и настройками. Если её держит запущенная старая версия, этот запуск
+/// работает со старой папкой, а перенос повторится в следующий раз.
+pub fn dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let base = PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()));
+        let dir = base.join("yamusic-rs");
+        if !dir.exists() {
+            if let Some(old) = ["yamusic-lite", "yawave"].iter().map(|n| base.join(n)).find(|p| p.exists()) {
+                if std::fs::rename(&old, &dir).is_err() {
+                    return old;
+                }
+            }
+        }
+        dir
+    })
+    .clone()
+}
+
+impl Config {
+    pub fn load() -> Self {
+        let mut c: Config = std::fs::read_to_string(dir().join("config.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        c.token = c.token_sealed.as_deref().and_then(crate::secret::open);
+        c.refresh_token = c.refresh_sealed.as_deref().and_then(crate::secret::open);
+        if c.token.is_none() && c.token_sealed.is_some() {
+            log("токен не расшифровался (другая учётная запись Windows?) — нужно войти заново");
+        }
+        if let Some(plain) = c.token_plain.clone().filter(|t| !t.trim().is_empty()) {
+            if c.token.is_none() {
+                c.token = Some(plain.trim().to_string());
+            }
+            // Открытый токен с диска убираем сразу.
+            c.save();
+        }
+        c
+    }
+
+    pub fn save(&self) {
+        let _ = std::fs::create_dir_all(dir());
+        let mut disk = self.clone();
+        disk.token_sealed = self.token.as_deref().and_then(crate::secret::seal);
+        disk.refresh_sealed = self.refresh_token.as_deref().and_then(crate::secret::seal);
+        // Без DPAPI (не Windows) — открытым текстом, как раньше.
+        disk.token_plain = if disk.token_sealed.is_none() { self.token.clone() } else { None };
+        if let Ok(s) = serde_json::to_string_pretty(&disk) {
+            let path = dir().join("config.json");
+            let tmp = dir().join("config.json.tmp");
+            if std::fs::write(&tmp, s).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
+    }
+}
+
+/// Лог в %APPDATA%\yamusic-rs\log.txt.
+pub fn log(msg: impl AsRef<str>) {
+    let msg = msg.as_ref();
+    #[cfg(debug_assertions)]
+    eprintln!("{msg}");
+    let _ = std::fs::create_dir_all(dir());
+    let path = dir().join("log.txt");
+    if std::fs::metadata(&path).map(|m| m.len() > 512 * 1024).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{t}] {msg}");
+    }
+}
+
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
