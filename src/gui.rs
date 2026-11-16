@@ -1418,6 +1418,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     );
     app.set_discord_on(cfg.discord_enabled);
     app.set_autostart(win::autostart_enabled());
+    app.set_download_dir(music_dir(&cfg).display().to_string().into());
     let ctx = Rc::new(Ctx {
         ui: ui.as_weak(),
         lite: Cell::new(lite),
@@ -2474,6 +2475,14 @@ impl Ctx {
                     }
                 });
             }
+            "download-dir" => {
+                let cur = music_dir(&self.st.borrow().cfg).display().to_string();
+                let Some(dir) = win::pick_folder(hwnd(&ui), &crate::i18n::tr("Папка для скачивания"), &cur) else { return };
+                app.set_download_dir(dir.clone().into());
+                let mut st = self.st.borrow_mut();
+                st.cfg.download_dir = dir;
+                st.cfg.save();
+            }
             "about" => win::open_url(env!("CARGO_PKG_REPOSITORY")),
             "discord" => {
                 let on = !app.get_discord_on();
@@ -2842,9 +2851,10 @@ impl Ctx {
             "download" => {
                 let Some(net) = net else { return };
                 let api = net.api.clone();
+                let dir = music_dir(&self.st.borrow().cfg);
                 self.toast(format!("Скачиваем «{}»", t.title));
                 std::thread::spawn(move || {
-                    let res = save_track(&api, &music_dir(), &t);
+                    let res = save_track(&api, &dir, &t);
                     net.say(match res {
                         Ok(p) => format!("Сохранено: {}", p.display()),
                         Err(e) => format!("Не удалось скачать: {e}"),
@@ -3408,8 +3418,8 @@ impl Ctx {
         self.st.borrow_mut().downloading = true;
         self.toast(format!("Скачиваем {}", tracks_word(tracks.len() as u64)));
         let api = net.api.clone();
+        let dir = music_dir(&self.st.borrow().cfg).join(file_name(&folder));
         std::thread::spawn(move || {
-            let dir = music_dir().join(file_name(&folder));
             let total = tracks.len();
             let (mut ok, mut failed) = (0, 0);
             for (i, t) in tracks.iter().enumerate() {
@@ -3438,7 +3448,10 @@ impl Ctx {
     }
 }
 
-fn music_dir() -> std::path::PathBuf {
+fn music_dir(cfg: &Config) -> std::path::PathBuf {
+    if !cfg.download_dir.is_empty() {
+        return cfg.download_dir.clone().into();
+    }
     std::path::PathBuf::from(std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into())).join("Music").join("Яндекс Музыка")
 }
 

@@ -38,6 +38,8 @@ features = [
   "Win32_System_Registry",
   "Win32_Security_Cryptography",
   "Win32_UI_Controls_Dialogs",
+  "Win32_UI_Shell_Common",
+  "Win32_System_Com",
 ]
 
 [build-dependencies]

@@ -133,6 +133,42 @@ pub fn pick_image(owner: isize, title: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..n]))
 }
 
+/// Системный диалог выбора папки, открывается на `start`. `None` — пользователь отказался.
+pub fn pick_folder(owner: isize, title: &str, start: &str) -> Option<String> {
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{
+        SHBrowseForFolderW, SHGetPathFromIDListW, BFFM_INITIALIZED, BFFM_SETSELECTIONW, BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW,
+    };
+    unsafe extern "system" fn on_init(hwnd: HWND, msg: u32, _: isize, data: isize) -> i32 {
+        if msg == BFFM_INITIALIZED {
+            SendMessageW(hwnd, BFFM_SETSELECTIONW, 1, data);
+        }
+        0
+    }
+    let title = wide(title);
+    let start = wide(start);
+    let mut buf = vec![0u16; 1024];
+    unsafe {
+        let mut bi: BROWSEINFOW = std::mem::zeroed();
+        bi.hwndOwner = h(owner);
+        bi.lpszTitle = title.as_ptr();
+        bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+        bi.lpfn = Some(on_init);
+        bi.lParam = start.as_ptr() as isize;
+        let pidl = SHBrowseForFolderW(&bi);
+        if pidl.is_null() {
+            return None;
+        }
+        let ok = SHGetPathFromIDListW(pidl, buf.as_mut_ptr());
+        CoTaskMemFree(pidl as *const c_void);
+        if ok == 0 {
+            return None;
+        }
+    }
+    let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..n]))
+}
+
 pub fn open_url(url: &str) {
     let op = wide("open");
     let u = wide(url);
