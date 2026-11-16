@@ -1405,6 +1405,8 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     );
     app.set_discord_on(cfg.discord_enabled);
     app.set_autostart(sys::autostart_enabled());
+    app.set_linux(cfg!(target_os = "linux"));
+    app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
     let ctx = Rc::new(Ctx {
         ui: ui.as_weak(),
