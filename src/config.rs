@@ -12,12 +12,13 @@ pub struct Config {
     pub token: Option<String>,
     #[serde(skip)]
     pub refresh_token: Option<String>,
-    /// Токены, зашифрованные DPAPI (src/secret.rs).
+    /// Токены под DPAPI или в связке ключей Linux (src/secret.rs).
     #[serde(skip_serializing_if = "Option::is_none")]
     token_sealed: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_sealed: Option<String>,
-    /// Старый формат — токен открытым текстом. При запуске переводится в зашифрованный.
+    /// Токен открытым текстом: старый формат или Linux без связки ключей. Как только спрятать есть
+    /// куда, при запуске переносится туда.
     #[serde(rename = "token", skip_serializing_if = "Option::is_none")]
     token_plain: Option<String>,
     /// Unix-время, когда токен истечёт.
@@ -105,7 +106,7 @@ impl Config {
         c.token = c.token_sealed.as_deref().and_then(crate::secret::open);
         c.refresh_token = c.refresh_sealed.as_deref().and_then(crate::secret::open);
         if c.token.is_none() && c.token_sealed.is_some() {
-            log("токен не расшифровался (другая учётная запись Windows?) — нужно войти заново");
+            log("сохранённый токен не прочитался (другая учётная запись, нет записи в связке ключей?) — нужно войти заново");
         }
         if let Some(plain) = c.token_plain.clone().filter(|t| !t.trim().is_empty()) {
             if c.token.is_none() {
@@ -120,9 +121,15 @@ impl Config {
     pub fn save(&self) {
         let _ = std::fs::create_dir_all(dir());
         let mut disk = self.clone();
-        disk.token_sealed = self.token.as_deref().and_then(crate::secret::seal);
-        disk.refresh_sealed = self.refresh_token.as_deref().and_then(crate::secret::seal);
-        // Без DPAPI (не Windows) — открытым текстом, как раньше.
+        disk.token_sealed = self.token.as_deref().and_then(|t| crate::secret::seal("token", t));
+        disk.refresh_sealed = self.refresh_token.as_deref().and_then(|t| crate::secret::seal("refresh", t));
+        if self.token.is_none() {
+            crate::secret::forget("token");
+        }
+        if self.refresh_token.is_none() {
+            crate::secret::forget("refresh");
+        }
+        // Спрятать некуда (Linux без связки ключей) — открытым текстом, в файле только для владельца.
         disk.token_plain = if disk.token_sealed.is_none() { self.token.clone() } else { None };
         if let Ok(s) = serde_json::to_string_pretty(&disk) {
             let path = dir().join("config.json");
