@@ -191,7 +191,9 @@ pub fn set_autostart(on: bool) -> bool {
     if !on {
         return std::fs::remove_file(&file).is_ok() || !file.exists();
     }
-    let Ok(exe) = std::env::current_exe() else { return false };
+    // Из AppImage current_exe указывает внутрь временного монтирования, а сам файл
+    // рантайм AppImage кладёт в $APPIMAGE.
+    let Some(exe) = std::env::var_os("APPIMAGE").map(PathBuf::from).or_else(|| std::env::current_exe().ok()) else { return false };
     let entry = format!("[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\"\nIcon={APP_ID}\n", env!("APP_NAME"), exe.display());
     file.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok()) && std::fs::write(&file, entry).is_ok()
 }
