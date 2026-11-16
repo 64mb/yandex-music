@@ -15,7 +15,15 @@ pub fn created(w: &slint::Window) -> bool {
     w.with_winit_window(|_| ()).is_some()
 }
 
-pub fn prepare(_: &slint::Window) {}
+/// Значок окна для X11 (`_NET_WM_ICON`). На Wayland его берут из .desktop по app_id.
+pub fn prepare(w: &slint::Window) {
+    let Ok(img) = image::load_from_memory(include_bytes!("../../packaging/icons/256.png")) else { return };
+    let img = img.to_rgba8();
+    let (iw, ih) = img.dimensions();
+    if let Ok(icon) = winit::window::Icon::from_rgba(img.into_raw(), iw, ih) {
+        w.with_winit_window(|w| w.set_window_icon(Some(icon)));
+    }
+}
 
 /// Wayland не даёт приложению забрать фокус без токена активации, там окно просто покажется.
 pub fn raise(w: &slint::Window) {
