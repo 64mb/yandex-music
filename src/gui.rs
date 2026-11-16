@@ -2525,6 +2525,9 @@ impl Ctx {
             let vibe = if l.album.is_some() { "Моя волна по альбому" } else { "Моя волна по плейлисту" };
             items.push(self.menu_entry("list-vibe", vibe, icons.get_m_vibe(), false));
         }
+        if !l.tracks.is_empty() {
+            items.push(self.menu_entry("list-playlist", "Добавить в плейлист", icons.get_m_add_playlist(), true));
+        }
         items.push(self.menu_entry("list-share", "Поделиться", icons.get_m_share(), true));
         if app.get_list_own() {
             items.push(self.menu_entry("list-rename", "Изменить название", icons.get_pencil(), false));
@@ -2534,7 +2537,10 @@ impl Ctx {
             items.push(self.menu_entry("list-cover", poster, icons.get_upload(), false));
             items.push(self.menu_entry("list-delete", "Удалить плейлист", icons.get_bucket_small(), false));
         }
+        // Без трека menu_playlist добавит весь открытый список.
+        self.st.borrow_mut().menu_track = None;
         self.show_menu(items, x, y, true);
+        self.load_menu_playlists();
     }
 
     /// Цель закрепа открытого списка; «Мне нравится» — плейлист 3 владельца.
@@ -2894,8 +2900,17 @@ impl Ctx {
             let st = self.st.borrow();
             (st.menu_track.clone(), st.menu_playlists.get(i).cloned(), st.net.clone())
         };
-        if let (Some(t), Some(pl), Some(net)) = (t, pl, net) {
-            net.add_to_playlist(&pl, &t);
+        let (Some(pl), Some(net)) = (pl, net) else { return };
+        if let Some(t) = t {
+            let title = t.title.clone();
+            net.add_to_playlist(&pl, vec![t], title);
+            return;
+        }
+        // Меню открыто у альбома или плейлиста — добавляем все его треки.
+        let Some(data) = self.list() else { return };
+        let Data::List(l) = &*data else { return };
+        if !l.tracks.is_empty() {
+            net.add_to_playlist(&pl, l.tracks.clone(), l.title.clone());
         }
     }
 
