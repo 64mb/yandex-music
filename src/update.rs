@@ -46,7 +46,7 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 /// Последний релиз, если он новее запущенной версии.
 pub fn check() -> Result<Option<Release>, String> {
     let api = env!("CARGO_PKG_REPOSITORY").replace("https://github.com/", "https://api.github.com/repos/");
-    let resp = client()?.get(format!("{api}/releases/latest")).send().map_err(|e| e.to_string())?;
+    let resp = client()?.get(format!("{api}/releases/latest")).send().map_err(|e| crate::config::chain(&e))?;
     // 404 — релизов ещё нет.
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -93,7 +93,7 @@ pub fn install(r: &Release) -> Result<PathBuf, String> {
         .send()
         .and_then(|r| r.error_for_status())
         .and_then(|r| r.bytes())
-        .map_err(|e| format!("загрузка: {e}"))?;
+        .map_err(|e| format!("загрузка: {}", crate::config::chain(&e)))?;
     if bytes.len() as u64 != *size {
         return Err("файл скачался не целиком".into());
     }

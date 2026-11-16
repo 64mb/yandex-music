@@ -328,26 +328,31 @@ impl Ctx {
                 with_ctx(|c| {
                     let Some(ui) = weak.upgrade() else { return };
                     let app = ui.global::<App>();
-                    if let Ok((name, avatar)) = about {
-                        app.set_login(name.into());
-                        if let Some(url) = avatar {
-                            let w = weak.clone();
-                            c.images.get(&url, 100, move |img| {
-                                if let Some(ui) = w.upgrade() {
-                                    ui.global::<App>().set_avatar(img.clone());
-                                }
-                            });
+                    match about {
+                        Ok((name, avatar)) => {
+                            app.set_login(name.into());
+                            if let Some(url) = avatar {
+                                let w = weak.clone();
+                                c.images.get(&url, 100, move |img| {
+                                    if let Some(ui) = w.upgrade() {
+                                        ui.global::<App>().set_avatar(img.clone());
+                                    }
+                                });
+                            }
                         }
+                        Err(e) => log(format!("профиль: {e}")),
                     }
                     match pins {
                         Ok(p) => c.set_pins(p),
                         Err(e) => log(format!("pins: {e}")),
                     }
-                    if let Ok(ids) = liked_albums {
-                        c.st.borrow_mut().liked_albums = ids.into_iter().collect();
+                    match liked_albums {
+                        Ok(ids) => c.st.borrow_mut().liked_albums = ids.into_iter().collect(),
+                        Err(e) => log(format!("понравившиеся альбомы: {e}")),
                     }
-                    if let Ok(keys) = liked_playlists {
-                        c.st.borrow_mut().liked_playlists = keys.into_iter().collect();
+                    match liked_playlists {
+                        Ok(keys) => c.st.borrow_mut().liked_playlists = keys.into_iter().collect(),
+                        Err(e) => log(format!("понравившиеся плейлисты: {e}")),
                     }
                     if let Some(on) = less_ai {
                         crate::api::LESS_AI.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -818,6 +823,14 @@ impl Ctx {
                 app.set_list_meta(app.get_login());
                 app.set_list_tint(Color::from_rgb_u8(217, 217, 217));
             }
+            ListKind::Artist => {
+                app.set_list_kind("artist".into());
+                app.set_list_kind_label(crate::i18n::tr("Популярные треки").into());
+                app.set_list_meta(tracks_word(l.tracks.len() as u64).into());
+                if let Some(c) = l.artist.as_ref().and_then(|a| a.color) {
+                    app.set_list_tint(soft(c));
+                }
+            }
             ListKind::Album => {
                 let a = l.album.as_ref();
                 app.set_list_kind("album".into());
@@ -930,9 +943,10 @@ impl Ctx {
     }
 
     fn list_id(l: &ListData) -> String {
-        match (&l.playlist, &l.album) {
-            (Some(p), _) => format!("{}:{}", p.uid, p.kind),
-            (_, Some(a)) => a.id.clone(),
+        match (&l.playlist, &l.album, &l.artist) {
+            (Some(p), _, _) => format!("{}:{}", p.uid, p.kind),
+            (_, Some(a), _) => a.id.clone(),
+            (_, _, Some(a)) => a.id.clone(),
             _ => "likes".into(),
         }
     }
@@ -987,9 +1001,10 @@ impl Ctx {
             return;
         }
         let start = self.st.borrow().view.get(i).copied().unwrap_or(0);
-        let wave = match (&l.playlist, &l.album) {
-            (Some(p), _) => Source::Seed { station: p.seed(), header: "Моя волна по плейлисту".into(), title: p.title.clone() },
-            (_, Some(a)) => Source::Seed { station: format!("album:{}", a.id), header: "Моя волна по альбому".into(), title: a.title.clone() },
+        let wave = match (&l.playlist, &l.album, &l.artist) {
+            (Some(p), _, _) => Source::Seed { station: p.seed(), header: "Моя волна по плейлисту".into(), title: p.title.clone() },
+            (_, Some(a), _) => Source::Seed { station: format!("album:{}", a.id), header: "Моя волна по альбому".into(), title: a.title.clone() },
+            (_, _, Some(a)) => Source::Seed { station: format!("artist:{}", a.id), header: "Моя волна по исполнителю".into(), title: a.name.clone() },
             _ => Source::Wave,
         };
         self.player.send(Cmd::PlayList {
@@ -1768,6 +1783,26 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         })
     });
 
+    // «Как в системе» следит за темой Windows и на ходу. На Linux её отдаёт портал через
+    // gdbus, запускать его каждые пару секунд не стоит.
+    #[cfg(windows)]
+    let theme_tick = Timer::default();
+    #[cfg(windows)]
+    theme_tick.start(TimerMode::Repeated, Duration::from_secs(2), || {
+        with_ctx(|c| {
+            if c.st.borrow().cfg.theme != "system" {
+                return;
+            }
+            let dark = !sys::system_light_theme();
+            if c.st.borrow().dark == dark {
+                return;
+            }
+            c.st.borrow_mut().dark = dark;
+            let ui = c.ui();
+            ui.global::<Theme>().set_dark(ui.global::<App>().get_page() == Page::Wave || dark);
+        })
+    });
+
     let weak = ui.as_weak();
     app.on_window_resized(move || {
         let weak = weak.clone();
@@ -2210,6 +2245,12 @@ impl Ctx {
     fn open_card(self: &Rc<Self>, block: &str, i: usize) {
         match block {
             "chart" => return self.navigate(Page::Chart, None, true),
+            "artist-tracks" => {
+                if let Some((id, _)) = self.current_artist() {
+                    self.navigate(Page::List, Some(format!("artist-tracks:{id}")), true);
+                }
+                return;
+            }
             "artist-more" => {
                 let (x, y) = (self.ui().window().size().width as f32 / self.ui().window().scale_factor() / 2.0, 300.0);
                 return self.open_artist_menu(x, y);
@@ -2613,7 +2654,7 @@ impl Ctx {
         let st = self.st.borrow();
         match st.list_key.as_deref()? {
             "likes" => Some(format!("playlist:{}:3", st.uid)),
-            k => Some(k.to_string()),
+            k => Some(k.strip_prefix("artist-tracks:").map_or_else(|| k.to_string(), |id| format!("artist:{id}"))),
         }
     }
 

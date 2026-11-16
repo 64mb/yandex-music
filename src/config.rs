@@ -160,6 +160,19 @@ impl Config {
     }
 }
 
+/// Ошибка вместе с причинами. reqwest сам пишет только «error sending request», а что
+/// случилось на самом деле (DNS, TLS, прокси, таймаут), лежит в source().
+pub fn chain(e: &dyn std::error::Error) -> String {
+    let mut s = e.to_string();
+    let mut src = e.source();
+    while let Some(x) = src {
+        s.push_str(": ");
+        s.push_str(&x.to_string());
+        src = x.source();
+    }
+    s
+}
+
 /// Лог в log.txt папки настроек.
 pub fn log(msg: impl AsRef<str>) {
     let msg = msg.as_ref();

@@ -35,8 +35,8 @@ fn client() -> reqwest::blocking::Client {
 }
 
 fn post(form: &[(&str, &str)], path: &str) -> Result<Value, String> {
-    let resp = client().post(format!("{OAUTH_BASE}{path}")).form(form).send().map_err(|e| format!("сеть: {e}"))?;
-    let text = resp.text().map_err(|e| format!("сеть: {e}"))?;
+    let resp = client().post(format!("{OAUTH_BASE}{path}")).form(form).send().map_err(|e| format!("сеть: {}", crate::config::chain(&e)))?;
+    let text = resp.text().map_err(|e| format!("сеть: {}", crate::config::chain(&e)))?;
     serde_json::from_str(&text).map_err(|_| format!("ответ OAuth: {}", text.chars().take(200).collect::<String>()))
 }
 
