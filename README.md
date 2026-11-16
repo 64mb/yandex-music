@@ -4,10 +4,11 @@
 
 # Яндекс Музыка RS
 
-**Интерфейс официального приложения Яндекс Музыки на Rust: один exe и в 13 раз меньше памяти.**
+**Интерфейс официального приложения Яндекс Музыки на Rust: один файл и в 13 раз меньше памяти.**
 
 [![Релиз](https://img.shields.io/github/v/release/SpolzerMod/yamusic-rs?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&color=ffd60a&labelColor=1c1c1f)](https://github.com/SpolzerMod/yamusic-rs/releases/latest)
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-2b2b30?labelColor=1c1c1f)
+![Linux бета](https://img.shields.io/badge/Linux-%D0%B1%D0%B5%D1%82%D0%B0-2b2b30?labelColor=1c1c1f)
 [![GPL-3.0](https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-GPL--3.0-2b2b30?labelColor=1c1c1f)](LICENSE)
 
 [Скачать](https://github.com/SpolzerMod/yamusic-rs/releases/latest) ·
@@ -32,7 +33,8 @@
 Официальное приложение Яндекс Музыки для Windows сделано на Electron: внутри браузер Chromium,
 семь процессов и около 850 МБ памяти. **Яндекс Музыка RS** повторяет его интерфейс (те же
 шрифты, цвета, отступы и страницы), но написана на Rust и рисует окно сама, на процессоре.
-В итоге один файл на 26 МБ, один процесс и около 65 МБ памяти.
+В итоге один файл на 26 МБ, один процесс и около 65 МБ памяти. Работает на Windows, а в бете
+и на Linux.
 
 <div align="center">
 <img src="docs/stats.gif" width="100%" alt="Оперативная память: 852 МБ против 64 МБ. Процессы: 7 против 1. Размер на диске: 356 МБ против 26 МБ">
@@ -55,10 +57,11 @@
 - Страницы исполнителей, альбомов и плейлистов. Свои плейлисты можно переименовывать, менять им
   обложку и описание, удалять из них треки.
 - Полноэкранный плеер с текстом песни, который идёт вместе с треком.
-- Скачивание треков с обложкой и тегами ID3. По умолчанию в `Музыка\Яндекс Музыка`, папку можно
-  сменить в настройках.
+- Скачивание треков с обложкой и тегами ID3. По умолчанию в `Музыка\Яндекс Музыка`
+  (на Linux в `~/Музыка/Яндекс Музыка`), папку можно сменить в настройках.
 - Эквалайзер на 10 полос, светлая и тёмная тема, русский, английский, узбекский и казахский языки.
-- Трей и автозапуск вместе с Windows. Если закрыть окно во время игры, музыка не остановится.
+- Автозапуск вместе с системой. На Windows есть трей: если закрыть окно во время игры, музыка
+  не остановится.
 - Мини-плеер поверх всех окон: обложка, название и три кнопки. Включается кнопкой рядом
   с «Свернуть».
 - Медиаклавиши клавиатуры работают, даже когда окно свёрнуто.
@@ -250,7 +253,7 @@ API Яндекса неофициальный и может меняться б�
 
 - токен уходит куда-то кроме `yandex.ru` и `yandex.net` или попадает в лог;
 - обновлялка ставит файл, который не совпадает с релизом;
-- другая программа или другой пользователь Windows может прочитать токен.
+- другая программа или другой пользователь компьютера может прочитать токен.
 
 Напишите через [Security → Report a vulnerability](https://github.com/SpolzerMod/yamusic-rs/security/advisories/new).
 Сообщение увидят только владельцы репозитория. Подробнее в [SECURITY.md](SECURITY.md).
@@ -273,10 +276,7 @@ API Яндекса неофициальный и может меняться б�
 
 ### Сборка
 
-Нужны:
-- Rust 1.92 или новее (`rustup update stable`);
-- Visual Studio Build Tools с компонентом «Разработка классических приложений на C++»
-  (MSVC и Windows SDK: из SDK берётся `rc.exe` для значка и описания exe).
+Нужен Rust 1.92 или новее (`rustup update stable`). Дальше на любой системе одинаково:
 
 ```bash
 git clone https://github.com/SpolzerMod/yamusic-rs
@@ -284,31 +284,54 @@ cd yamusic-rs
 cargo build --release
 ```
 
-Готовый файл: `target\release\yamusic-rs.exe`. Первая сборка занимает 5–10 минут, в основном
-из-за Skia и LTO.
+Первая сборка занимает 5–10 минут, в основном из-за Skia и LTO. Для отладки подойдёт
+`cargo run`: в debug-сборке лог дублируется в консоль.
 
-Если `skia-bindings` не может скачать готовые бинарники Skia (корпоративный прокси, ошибка curl),
-скачайте архив для своей платформы с [rust-skia/skia-binaries](https://github.com/rust-skia/skia-binaries/releases)
-и укажите путь в переменной окружения:
+#### Windows
+
+Нужны Visual Studio Build Tools с компонентом «Разработка классических приложений на C++»
+(MSVC и Windows SDK: из SDK берётся `rc.exe` для значка и описания exe).
+Готовый файл: `target\release\yamusic-rs.exe`.
+
+#### Linux
+
+Нужны компилятор C и заголовки библиотек.
+
+Debian, Ubuntu, Mint:
 
 ```bash
-SKIA_BINARIES_URL=file://C:/путь/к/skia.tar.gz cargo build --release
+sudo apt install build-essential pkg-config libasound2-dev libfontconfig1-dev libfreetype-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxrandr-dev
 ```
 
-Для отладки подойдёт `cargo run`: в debug-сборке лог дублируется в консоль.
-
-На Linux вместо Visual Studio нужны компилятор и заголовки библиотек. Для Debian и Ubuntu:
+Fedora:
 
 ```bash
-sudo apt install build-essential pkg-config libasound2-dev libfontconfig1-dev libfreetype-dev \
-  libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
-  libxcursor-dev libxi-dev libxrandr-dev
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config alsa-lib-devel fontconfig-devel freetype-devel wayland-devel libxkbcommon-devel libxkbcommon-x11-devel libX11-devel libXcursor-devel libXi-devel libXrandr-devel
+```
+
+Arch:
+
+```bash
+sudo pacman -S --needed base-devel alsa-lib fontconfig freetype2 wayland libxkbcommon libxkbcommon-x11 libx11 libxcursor libxi libxrandr
 ```
 
 Готовый файл: `target/release/yamusic-rs`. Пакеты собираются из него: `cargo deb --no-build`
 ([cargo-deb](https://github.com/kornelski/cargo-deb)), `cargo generate-rpm`
 ([cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm)) и `tools/appimage.sh`.
 Релизы собираются на Ubuntu 22.04: собранное на более новой системе потребует её версию glibc.
+
+#### Если Skia не скачивается
+
+`skia-bindings` при сборке скачивает готовые бинарники Skia. Если не получается (корпоративный
+прокси, ошибка curl), скачайте архив для своей системы с
+[rust-skia/skia-binaries](https://github.com/rust-skia/skia-binaries/releases) и укажите путь
+в переменной окружения:
+
+```bash
+SKIA_BINARIES_URL=file:///путь/к/skia.tar.gz cargo build --release
+```
+
+На Windows путь пишется как `file://C:/путь/к/skia.tar.gz`.
 
 ### Как устроено
 
@@ -327,7 +350,7 @@ sudo apt install build-essential pkg-config libasound2-dev libfontconfig1-dev li
 | `src/mpris.rs` | Медиаклавиши и плеер в панели Linux (MPRIS по D-Bus). |
 | `src/secret.rs` | Где хранится токен: DPAPI на Windows, связка ключей на Linux. |
 | `src/discord.rs` | Rich Presence через локальный канал Discord, без сторонних библиотек. |
-| `src/update.rs` | Проверка релизов на GitHub и замена exe на лету. |
+| `src/update.rs` | Проверка релизов на GitHub и замена exe на лету (на Linux — ссылка на релиз). |
 | `ui/theme.slint`, `src/palette.rs` | Сгенерированы `tools/gen_theme.py` и `tools/gen_palette.py` из CSS и JS оригинала. Руками не править. |
 
 Приложение не перерисовывали на глаз. Цвета, размеры и отступы
@@ -350,12 +373,12 @@ sudo apt install build-essential pkg-config libasound2-dev libfontconfig1-dev li
 
 ### Релиз
 
-Exe для релизов собирает GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml))
+Файлы для релизов собирает GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml))
 из исходников тега. Лог сборки открыт, поэтому видно, из какого кода получился файл.
 
 ```bash
-git tag v1.0.1          # версия должна совпадать с Cargo.toml
-git push origin v1.0.1
+git tag v1.1.0          # версия должна совпадать с Cargo.toml
+git push origin v1.1.0
 ```
 
 Сборка прогоняет clippy и тесты на Windows и на Linux, собирает `yamusic-rs.exe`, `.deb`, `.rpm`
@@ -376,13 +399,13 @@ Copyright © 2026 Spolzer. Код распространяется по лице
 
 ## English
 
-**Yandex Music RS** is an unofficial Yandex Music client for Windows and Linux written in Rust. It mirrors the
-official desktop app closely (same fonts, colours, layout and pages), but instead of
-Electron it is a single 26 MB executable that renders its window on the CPU with Slint and Skia.
+**Yandex Music RS** is an unofficial Yandex Music client for Windows and Linux written in Rust.
+It mirrors the official desktop app closely (same fonts, colours, layout and pages), but instead
+of Electron it is a single 26 MB executable that renders its window on the CPU with Slint and Skia.
 Running the same scenario, the official app uses about 850 MB of RAM across 7 processes, and RS
 uses about 65 MB in one process.
 
-- **Download** `yamusic-rs.exe` from the [latest release](https://github.com/SpolzerMod/yamusic-rs/releases/latest)
+- **Windows:** download `yamusic-rs.exe` from the [latest release](https://github.com/SpolzerMod/yamusic-rs/releases/latest)
   and run it; there is no installer. Sign in with the code shown at [ya.ru/device](https://ya.ru/device).
   The app updates itself from GitHub releases.
 - **Linux (beta):** the release has a `.deb` (Debian, Ubuntu, Mint), an `.rpm` (Fedora, openSUSE)
