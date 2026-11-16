@@ -1266,7 +1266,7 @@ impl Api {
             self.req(Method::POST, &format!("/users/{uid}/dislikes/tracks/add-multiple"))
                 .form(&[("track-ids", track_full_id)]),
         )
-        .map(|_| ())
+        .map(|v| crate::config::log(format!("dislike {track_full_id}: {v}")))
     }
 
     // ---------- каталог ----------
