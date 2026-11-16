@@ -208,7 +208,7 @@ impl Ctx {
         if let Status::Failed(e) = &s.status {
             // Токен отозван или истёк — обратно на экран входа.
             if self.st.borrow().net.is_none() && e.contains("токен") && !app.get_logged_out() {
-                self.st.borrow_mut().cfg.token = None;
+                self.st.borrow_mut().cfg.forget_token();
                 self.st.borrow().cfg.save();
                 self.login_start();
             } else if app.get_toast().is_empty() && !app.get_logged_out() {
@@ -2133,8 +2133,8 @@ impl Ctx {
         self.player.send(Cmd::Logout);
         {
             let mut st = self.st.borrow_mut();
-            st.cfg.token = None;
-            st.cfg.refresh_token = None;
+            st.cfg.forget_token();
+            st.cfg.forget_refresh();
             st.cfg.token_expires = None;
             st.cfg.save();
             st.net = None;

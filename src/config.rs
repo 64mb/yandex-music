@@ -106,7 +106,7 @@ impl Config {
         c.token = c.token_sealed.as_deref().and_then(crate::secret::open);
         c.refresh_token = c.refresh_sealed.as_deref().and_then(crate::secret::open);
         if c.token.is_none() && c.token_sealed.is_some() {
-            log("сохранённый токен не прочитался (другая учётная запись, нет записи в связке ключей?) — нужно войти заново");
+            log("сохранённый токен не прочитался (другая учётная запись, связка ключей заперта или в ней нет записи?) — нужно войти заново");
         }
         if let Some(plain) = c.token_plain.clone().filter(|t| !t.trim().is_empty()) {
             if c.token.is_none() {
@@ -121,13 +121,13 @@ impl Config {
     pub fn save(&self) {
         let _ = std::fs::create_dir_all(dir());
         let mut disk = self.clone();
-        disk.token_sealed = self.token.as_deref().and_then(|t| crate::secret::seal("token", t));
-        disk.refresh_sealed = self.refresh_token.as_deref().and_then(|t| crate::secret::seal("refresh", t));
-        if self.token.is_none() {
-            crate::secret::forget("token");
+        // Токен не прочитался (связка ключей заперта) — запись о нём не трогаем, иначе после
+        // разблокировки входить придётся заново. Стирают её только forget_token и forget_refresh.
+        if let Some(t) = &self.token {
+            disk.token_sealed = crate::secret::seal("token", t);
         }
-        if self.refresh_token.is_none() {
-            crate::secret::forget("refresh");
+        if let Some(t) = &self.refresh_token {
+            disk.refresh_sealed = crate::secret::seal("refresh", t);
         }
         // Спрятать некуда (Linux без связки ключей) — открытым текстом, в файле только для владельца.
         disk.token_plain = if disk.token_sealed.is_none() { self.token.clone() } else { None };
@@ -144,6 +144,19 @@ impl Config {
                 let _ = std::fs::rename(&tmp, &path);
             }
         }
+    }
+
+    /// Выход или токен отозван: убрать и из памяти, и с диска.
+    pub fn forget_token(&mut self) {
+        self.token = None;
+        self.token_sealed = None;
+        crate::secret::forget("token");
+    }
+
+    pub fn forget_refresh(&mut self) {
+        self.refresh_token = None;
+        self.refresh_sealed = None;
+        crate::secret::forget("refresh");
     }
 }
 
