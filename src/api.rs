@@ -1185,6 +1185,9 @@ impl Api {
         if !queue.is_empty() {
             body["queue"] = json!(queue);
         }
+        if LESS_AI.load(std::sync::atomic::Ordering::Relaxed) {
+            body["aiContentReductionEnabled"] = json!(true);
+        }
         let v = self.session_req("/rotor/session/new", &body)?;
         let id = str_of(&v, "radioSessionId");
         parse_batch(&v, id)
