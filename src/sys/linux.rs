@@ -11,6 +11,23 @@ use std::sync::Mutex;
 /// Как app_id в main.rs и имя .desktop в пакете.
 const APP_ID: &str = "yamusic-rs";
 
+/// Имя и значок в микшере громкости. Звук идёт через ALSA, и без этого PulseAudio и PipeWire
+/// показывают поток как «ALSA plug-in [yamusic-rs]». PULSE_PROP_* читает модуль pulse из
+/// alsa-plugins, PIPEWIRE_PROPS — pipewire-alsa. Заданное пользователем не трогаем.
+/// Вызывать первым делом в main: менять окружение, когда есть другие потоки, нельзя.
+pub fn audio_identity() {
+    let name = env!("APP_NAME");
+    let set = |key: &str, value: &str| {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    };
+    set("PULSE_PROP_application.name", name);
+    set("PULSE_PROP_application.icon_name", APP_ID);
+    set("PULSE_PROP_media.role", "music");
+    set("PIPEWIRE_PROPS", &format!(r#"{{ application.name = "{name}" application.icon-name = {APP_ID} media.role = Music }}"#));
+}
+
 pub fn created(w: &slint::Window) -> bool {
     w.with_winit_window(|_| ()).is_some()
 }

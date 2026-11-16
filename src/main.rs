@@ -28,6 +28,8 @@ mod update;
 mod yandex_id;
 
 fn main() -> Result<(), slint::PlatformError> {
+    #[cfg(target_os = "linux")]
+    sys::audio_identity();
     // После обновления старая версия ещё закрывается: ждём её до 15 секунд.
     let after_update = std::env::args().any(|a| a == update::AFTER_UPDATE);
     let mut claimed = sys::claim_instance();
