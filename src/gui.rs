@@ -1654,6 +1654,48 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         }
     });
     let weak = ui.as_weak();
+    // Место и размер обычного окна до мини-плеера и последнее место самой плашки.
+    let normal = std::cell::Cell::new(None::<(slint::PhysicalPosition, slint::PhysicalSize, bool)>);
+    let mini_pos = std::cell::Cell::new(None::<slint::PhysicalPosition>);
+    app.on_toggle_mini(move || {
+        use winit::dpi::LogicalSize;
+        let Some(ui) = weak.upgrade() else { return };
+        let app = ui.global::<App>();
+        let w = ui.window();
+        if !app.get_mini() {
+            normal.set(Some((w.position(), w.size(), w.is_maximized())));
+            app.set_mini(true);
+            app.set_maximized(false);
+            w.set_maximized(false);
+            // Slint обновит ограничения размера только на следующем кадре, а Windows без этого не даст ужать окно.
+            w.with_winit_window(|ww| {
+                ww.set_maximized(false);
+                ww.set_min_inner_size(Some(LogicalSize::new(320.0, 88.0)));
+            });
+            w.set_size(slint::LogicalSize::new(400.0, 88.0));
+            let k = w.scale_factor();
+            let (mw, mh, gap) = ((400.0 * k) as i32, (88.0 * k) as i32, (16.0 * k) as i32);
+            let (l, t, r, b) = win::work_area(hwnd(&ui));
+            let p = mini_pos.get().unwrap_or(slint::PhysicalPosition::new(r - mw - gap, b - mh - gap));
+            w.set_position(slint::PhysicalPosition::new(p.x.min(r - mw).max(l), p.y.min(b - mh).max(t)));
+        } else {
+            mini_pos.set(Some(w.position()));
+            app.set_mini(false);
+            w.with_winit_window(|ww| ww.set_min_inner_size(Some(LogicalSize::new(960.0, 640.0))));
+            match normal.take() {
+                Some((pos, size, max)) => {
+                    w.set_size(size);
+                    w.set_position(pos);
+                    if max {
+                        w.set_maximized(true);
+                        app.set_maximized(true);
+                    }
+                }
+                None => w.set_size(slint::LogicalSize::new(1280.0, 800.0)),
+            }
+        }
+    });
+    let weak = ui.as_weak();
     app.on_resize_window(move |dir| {
         use winit::window::ResizeDirection as D;
         let d = [D::North, D::NorthEast, D::East, D::SouthEast, D::South, D::SouthWest, D::West, D::NorthWest][dir.clamp(0, 7) as usize];

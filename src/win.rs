@@ -169,6 +169,18 @@ pub fn pick_folder(owner: isize, title: &str, start: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..n]))
 }
 
+/// Рабочая область монитора с окном (без панели задач), в физических пикселях: лево, верх, право, низ.
+pub fn work_area(hwnd: isize) -> (i32, i32, i32, i32) {
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    unsafe {
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        GetMonitorInfoW(MonitorFromWindow(h(hwnd), MONITOR_DEFAULTTONEAREST), &mut mi);
+        let r = mi.rcWork;
+        (r.left, r.top, r.right, r.bottom)
+    }
+}
+
 pub fn open_url(url: &str) {
     let op = wide("open");
     let u = wide(url);

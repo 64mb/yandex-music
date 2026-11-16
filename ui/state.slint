@@ -479,6 +479,9 @@ export global App {
     // Полный масштаб окна (DPI × ui-scale): сколько физических пикселей в 1px.
     in property <float> dpr: 1;
     callback minimize();
+    // Мини-плеер поверх всех окон.
+    in-out property <bool> mini;
+    callback toggle-mini();
     callback close();
 
     pure callback format-time(float) -> string;
