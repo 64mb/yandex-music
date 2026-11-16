@@ -49,7 +49,7 @@ fn device_id() -> String {
             return id;
         }
     }
-    let seed = format!("{:?}{}{}", std::time::SystemTime::now(), std::process::id(), std::env::var("COMPUTERNAME").unwrap_or_default());
+    let seed = format!("{:?}{}{}", std::time::SystemTime::now(), std::process::id(), crate::sys::hostname().unwrap_or_default());
     let id: String = {
         use md5::{Digest, Md5};
         Md5::digest(seed.as_bytes()).iter().map(|x| format!("{x:02x}")).collect()
@@ -61,7 +61,7 @@ fn device_id() -> String {
 
 pub fn device_code() -> Result<DeviceCode, String> {
     let id = device_id();
-    let host = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into());
+    let host = crate::sys::hostname().unwrap_or_else(|| "PC".into());
     // Это имя Яндекс показывает при вводе кода и в списке устройств аккаунта.
     let name = format!("{} ({host})", env!("APP_NAME"));
     let v = post(&[("client_id", OAUTH_CLIENT_ID), ("device_id", &id), ("device_name", &name)], "/device/code")?;

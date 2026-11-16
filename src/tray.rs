@@ -1,7 +1,7 @@
 //! Значок в области уведомлений, как у оригинала: клик сворачивает и разворачивает окно,
 //! правый клик — меню с управлением плеером.
 
-use crate::win::wide;
+use crate::sys::wide;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::ptr::{null, null_mut};
@@ -55,7 +55,7 @@ thread_local! {
 }
 
 fn load_icon() -> HICON {
-    crate::win::app_icon(unsafe { GetSystemMetrics(SM_CXSMICON) })
+    crate::sys::app_icon(unsafe { GetSystemMetrics(SM_CXSMICON) })
 }
 
 fn notify_data(hwnd: HWND, icon: HICON) -> NOTIFYICONDATAW {
