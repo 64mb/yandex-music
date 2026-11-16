@@ -44,6 +44,11 @@ features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
+# MPRIS на zbus 5, как у slint: второй копии zbus в сборке нет. async-io и futures-lite
+# приходят вместе с zbus и нужны для таймера и ожидания двух задач без tokio.
+mpris-server = "0.10"
+async-io = "2"
+futures-lite = "2"
 
 [build-dependencies]
 slint-build = "1.18"

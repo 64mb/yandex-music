@@ -1735,6 +1735,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         sys::on_wake(move || {
             let _ = weak.upgrade_in_event_loop(|ui| reveal(&ui));
         });
+        install_mpris(&ui, &player);
     }
 
     ui.window().on_winit_window_event(|_, ev| {
@@ -1785,6 +1786,34 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     // Фоновые потоки (аудио, сеть, обложки) не ждём: иначе процесс может остаться
     // без окна и держать мьютекс, и следующий запуск молча закроется.
     std::process::exit(0)
+}
+
+/// Медиаклавиши и плеер в панели Linux. Команды выполняются так же, как кнопки в окне.
+#[cfg(target_os = "linux")]
+fn install_mpris(ui: &AppWindow, player: &Player) {
+    let weak = ui.as_weak();
+    let p = player.clone();
+    crate::mpris::spawn(player.clone(), move |e| {
+        let p = p.clone();
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            use crate::mpris::Event;
+            let app = ui.global::<App>();
+            let s = p.state();
+            match e {
+                Event::PlayPause => app.invoke_play_pause(),
+                Event::Play if !s.playing => app.invoke_play_pause(),
+                Event::Pause if s.playing => app.invoke_play_pause(),
+                Event::Play | Event::Pause => {}
+                Event::Next => p.send(Cmd::Next),
+                Event::Prev => p.send(Cmd::Prev),
+                Event::Seek(sec) => p.send(Cmd::Seek(sec)),
+                Event::SeekBy(sec) => p.send(Cmd::Seek((s.position + sec).max(0.0))),
+                Event::Volume(v) => app.invoke_set_volume(v),
+                Event::Raise => reveal(&ui),
+                Event::Quit => quit(),
+            }
+        });
+    });
 }
 
 #[cfg(windows)]

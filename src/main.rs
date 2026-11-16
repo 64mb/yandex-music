@@ -14,6 +14,8 @@ mod gui;
 mod i18n;
 mod images;
 mod landing;
+#[cfg(target_os = "linux")]
+mod mpris;
 mod net;
 mod palette;
 mod player;
