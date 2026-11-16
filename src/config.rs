@@ -68,13 +68,13 @@ impl Default for Config {
     }
 }
 
-/// %APPDATA%\yamusic-rs. Папка прежнего названия (yamusic-lite, ещё раньше yawave) переносится
+/// %APPDATA%\yamusic-rs или ~/.config/yamusic-rs. Папка прежнего названия (yamusic-lite, ещё раньше yawave) переносится
 /// молча, вместе с токеном и настройками. Если её держит запущенная старая версия, этот запуск
 /// работает со старой папкой, а перенос повторится в следующий раз.
 pub fn dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
-        let base = PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()));
+        let base = crate::sys::config_base();
         let dir = base.join("yamusic-rs");
         if !dir.exists() {
             if let Some(old) = ["yamusic-lite", "yawave"].iter().map(|n| base.join(n)).find(|p| p.exists()) {
@@ -86,6 +86,14 @@ pub fn dir() -> PathBuf {
         dir
     })
     .clone()
+}
+
+/// Скачанные шрифты и значки. На Windows лежат рядом с настройками, на Linux — в ~/.cache.
+pub fn cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    return dir();
+    #[cfg(not(windows))]
+    return crate::sys::cache_base().join("yamusic-rs");
 }
 
 impl Config {
@@ -120,13 +128,19 @@ impl Config {
             let path = dir().join("config.json");
             let tmp = dir().join("config.json.tmp");
             if std::fs::write(&tmp, s).is_ok() {
+                // Без DPAPI токен лежит открытым текстом: файл только для владельца.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+                }
                 let _ = std::fs::rename(&tmp, &path);
             }
         }
     }
 }
 
-/// Лог в %APPDATA%\yamusic-rs\log.txt.
+/// Лог в log.txt папки настроек.
 pub fn log(msg: impl AsRef<str>) {
     let msg = msg.as_ref();
     #[cfg(debug_assertions)]

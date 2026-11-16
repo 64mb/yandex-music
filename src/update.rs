@@ -3,7 +3,7 @@
 //! скачивает `yamusic-rs.exe` нового релиза, сверяет SHA-256 с тем, что показывает GitHub,
 //! и подменяет собой запущенный файл: Windows не даёт перезаписать работающий exe, но даёт
 //! его переименовать. Старый файл (`*.old.exe`) удаляется при следующем запуске.
-//! Если папка недоступна для записи, кнопка открывает страницу релиза.
+//! Если папка недоступна для записи, кнопка открывает страницу релиза. На Linux — всегда её.
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -62,7 +62,9 @@ pub fn check() -> Result<Option<Release>, String> {
     if latest <= current {
         return Ok(None);
     }
-    let exe = v.get("assets").and_then(|a| a.as_array()).and_then(|assets| {
+    // На Linux exe не нужен: новый пакет ставится со страницы релиза.
+    let assets = v.get("assets").and_then(|a| a.as_array()).filter(|_| cfg!(windows));
+    let exe = assets.and_then(|assets| {
         let a = assets.iter().find(|a| a.get("name").and_then(|n| n.as_str()) == Some(ASSET))?;
         let url = a.get("browser_download_url")?.as_str()?.to_string();
         let size = a.get("size")?.as_u64()?;

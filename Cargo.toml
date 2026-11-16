@@ -42,6 +42,9 @@ features = [
   "Win32_System_Com",
 ]
 
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
+
 [build-dependencies]
 slint-build = "1.18"
 

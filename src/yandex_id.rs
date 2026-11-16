@@ -30,7 +30,7 @@ const ICONS: [(&str, &str); 10] = [
 pub type Svgs = HashMap<String, String>;
 
 fn dir() -> PathBuf {
-    crate::config::dir().join("assets").join("id")
+    crate::config::cache_dir().join("assets").join("id")
 }
 
 fn names() -> impl Iterator<Item = String> {
