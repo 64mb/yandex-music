@@ -87,6 +87,8 @@
 
 ## Установка
 
+### Windows
+
 1. Скачайте `yamusic-rs.exe` со страницы [последнего релиза](https://github.com/SpolzerMod/yamusic-rs/releases/latest).
 2. Положите файл в любую папку, например в `Документы` или `C:\Programs`, и запустите.
    Установщика нет, приложение целиком помещается в один exe.
@@ -111,6 +113,30 @@
 
 Скачанные треки лежат в `Музыка\Яндекс Музыка`, их удаляйте по желанию.
 
+### Linux (бета)
+
+В релизе три файла, внутри одна и та же программа. Выберите тот, что подходит вашей системе:
+
+| Система | Файл | Установка |
+| --- | --- | --- |
+| Debian, Ubuntu, Mint и производные | `yamusic-rs_<версия>-1_amd64.deb` | `sudo apt install ./yamusic-rs_*.deb` |
+| Fedora, openSUSE | `yamusic-rs-<версия>-1.x86_64.rpm` | `sudo dnf install ./yamusic-rs-*.rpm` или `sudo zypper install ./yamusic-rs-*.rpm` |
+| Любая другая, в том числе Arch | `yamusic-rs-x86_64.AppImage` | `chmod +x yamusic-rs-x86_64.AppImage` и запустить |
+
+AppImage монтирует себя через FUSE. Если пишет `Cannot mount AppImage`, поставьте пакет `fuse3`
+или запускайте с распаковкой: `APPIMAGE_EXTRACT_AND_RUN=1 ./yamusic-rs-x86_64.AppImage`.
+
+Для Arch есть и [`PKGBUILD`](packaging/aur/PKGBUILD): он собирает пакет из `.deb` релиза (`makepkg -si`).
+
+Приложение появится в меню как «Яндекс Музыка RS». Вход такой же, по коду на ya.ru/device.
+
+**Обновление.** Приложение сообщает о новой версии, кнопка «Обновить» открывает страницу релиза.
+Пакет ставится поверх старого той же командой, AppImage заменяется новым файлом.
+
+**Удаление.** `sudo apt remove yamusic-rs`, `sudo dnf remove yamusic-rs` или удалить AppImage. Настройки
+и вход лежат в `~/.config/yamusic-rs`, кэш в `~/.cache/yamusic-rs`, токен в связке ключей под
+именем «Яндекс Музыка RS» (его можно удалить в «Паролях и ключах» или в KWallet).
+
 ## Какие системы поддерживаются
 
 | Система | Состояние |
@@ -119,14 +145,16 @@
 | **Windows 10** x64 | Должна работать: приложение использует те же API. Углы окна будут прямыми, потому что скругление есть только в Windows 11. Регулярно не проверяется, о проблемах пишите в [issues](https://github.com/SpolzerMod/yamusic-rs/issues). |
 | Windows на ARM | Должна запускаться через эмуляцию x64. Не проверялась. |
 | Windows 7 и 8.1 | Не поддерживаются: текущий Rust под них не собирает. |
-| **Linux** | В планах. Сборки AppImage будут выходить пре-релизами, тестировать будем вместе с пользователями. |
+| **Linux** x86_64 | Бета. Нужна glibc 2.35 или новее: Ubuntu 22.04+, Debian 12+, Mint 21+, Fedora, openSUSE, Arch и другие. Проверено на Ubuntu 22.04, Debian 13, Fedora 45 и Arch, в Wayland и X11. Звук через PipeWire, PulseAudio или ALSA. Медиаклавиши и плеер в панели GNOME и KDE работают через MPRIS. Трея пока нет, поэтому закрытие окна закрывает приложение. О проблемах пишите в [issues](https://github.com/SpolzerMod/yamusic-rs/issues). |
 | macOS | Пока не планируется. |
 
 **Нужно ещё:**
 - аккаунт Яндекса. Без Плюса сервер отдаёт только 30-секундные отрывки;
 - интернет. Офлайн-режима, как в мобильном приложении, нет;
 - шрифты YS Text и иконки. Если официальное приложение установлено, RS берёт их из него.
-  Если нет, один раз скачивает с music.yandex.ru в `%APPDATA%\yamusic-rs\assets`.
+  Если нет, один раз скачивает с music.yandex.ru в `%APPDATA%\yamusic-rs\assets`
+  (на Linux в `~/.cache/yamusic-rs/assets`). Официального приложения под Linux нет, поэтому
+  там интерфейс пока только на русском: словари других языков есть только в нём.
 
 ## Частые вопросы
 
@@ -138,6 +166,10 @@
 Вход идёт по коду устройства через ya.ru/device, пароль приложение не видит. Полученный токен
 шифруется средствами Windows (DPAPI) и хранится в `%APPDATA%\yamusic-rs\config.json`. Расшифровать
 его может только ваша учётная запись Windows на этом компьютере.
+
+На Linux токен лежит в связке ключей (GNOME Keyring, KWallet или другая служба Secret Service),
+а в `~/.config/yamusic-rs/config.json` остаётся только имя записи. Если связки ключей нет, например
+в голом оконном менеджере, токен хранится в этом файле, который может читать только ваш пользователь.
 
 Токен отправляется только по https и только на домены `yandex.ru` и `yandex.net`. Проверка
 встроена в код (`src/client.rs`). Кроме Яндекса приложение ходит только к `api.github.com`,
@@ -168,7 +200,7 @@
 - на «Для вас и Тренды» показываются не все блоки: например, «Подборки музыки» и «Артист рекомендует»
   пока пропускаются;
 - нет выбора города для концертов и загрузки своих треков;
-- нет панели управления в системном меню громкости;
+- на Windows нет панели управления в системном меню громкости (на Linux она есть через MPRIS);
 - собственные настройки RS («Режим работы», «Статус в Discord», автозапуск) переведены только на русский.
 
 Есть и то, чего нет в оригинале: режим «Лёгкий», статус в Discord, автозапуск в трее.
@@ -179,8 +211,9 @@
 
 <br>
 
-Ошибки пишутся в `%APPDATA%\yamusic-rs\log.txt`. API Яндекса неофициальный и может меняться без
-предупреждения. Как сообщить о проблеме, написано [ниже](#как-помочь).
+Ошибки пишутся в `%APPDATA%\yamusic-rs\log.txt`, на Linux в `~/.config/yamusic-rs/log.txt`.
+API Яндекса неофициальный и может меняться без предупреждения.
+Как сообщить о проблеме, написано [ниже](#как-помочь).
 </details>
 
 <details>
@@ -189,7 +222,8 @@
 <br>
 
 `yamusic-rs.exe --tray` запускает приложение сразу в трее, так же работает автозапуск. Второй
-запуск не открывает вторую копию, а показывает уже открытое окно.
+запуск не открывает вторую копию, а показывает уже открытое окно. На Linux трея пока нет, поэтому
+автозапуск открывает окно, а `--tray` ничего не делает. Второй запуск так же показывает открытое окно.
 </details>
 
 ## Как помочь
@@ -198,9 +232,10 @@
 
 Откройте [issue](https://github.com/SpolzerMod/yamusic-rs/issues/new/choose) и напишите:
 
-- версию RS из «Настройки → О приложении» и версию Windows;
+- версию RS из «Настройки → О приложении» и версию системы (на Linux ещё дистрибутив и окружение: GNOME, KDE…);
 - что вы делали, что ожидали увидеть и что получилось;
-- последние строки `%APPDATA%\yamusic-rs\log.txt`, если там есть что-то про эту ошибку.
+- последние строки `%APPDATA%\yamusic-rs\log.txt` (на Linux `~/.config/yamusic-rs/log.txt`),
+  если там есть что-то про эту ошибку.
 
 Токена в логе нет, но в адресах запросов может встретиться числовой id вашего аккаунта. Его можно
 заменить на `***`. Со скриншотами то же самое: закрепы и рекомендации показывают ваши вкусы,
@@ -262,6 +297,19 @@ SKIA_BINARIES_URL=file://C:/путь/к/skia.tar.gz cargo build --release
 
 Для отладки подойдёт `cargo run`: в debug-сборке лог дублируется в консоль.
 
+На Linux вместо Visual Studio нужны компилятор и заголовки библиотек. Для Debian и Ubuntu:
+
+```bash
+sudo apt install build-essential pkg-config libasound2-dev libfontconfig1-dev libfreetype-dev \
+  libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
+  libxcursor-dev libxi-dev libxrandr-dev
+```
+
+Готовый файл: `target/release/yamusic-rs`. Пакеты собираются из него: `cargo deb --no-build`
+([cargo-deb](https://github.com/kornelski/cargo-deb)), `cargo generate-rpm`
+([cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm)) и `tools/appimage.sh`.
+Релизы собираются на Ubuntu 22.04: собранное на более новой системе потребует её версию glibc.
+
 ### Как устроено
 
 | Файл | Что внутри |
@@ -274,7 +322,10 @@ SKIA_BINARIES_URL=file://C:/путь/к/skia.tar.gz cargo build --release
 | `src/landing.rs` | Страницы из серверных блоков («Для вас», «Концерты», «Книги и подкасты»). |
 | `src/assets.rs`, `src/i18n.rs` | Шрифты, спрайт иконок и словари переводов из `app.asar` оригинала или с music.yandex.ru. |
 | `src/images.rs`, `src/net.rs` | Фоновая загрузка обложек и данных страниц, кэши с бюджетом памяти. |
-| `src/tray.rs`, `src/win.rs` | Трей, окна, автозапуск и прочий Win32. |
+| `src/sys/windows.rs`, `src/tray.rs` | Окна, трей, автозапуск и прочий Win32. |
+| `src/sys/linux.rs` | То же для Linux: пути XDG, один экземпляр через сокет, диалоги, автозапуск. |
+| `src/mpris.rs` | Медиаклавиши и плеер в панели Linux (MPRIS по D-Bus). |
+| `src/secret.rs` | Где хранится токен: DPAPI на Windows, связка ключей на Linux. |
 | `src/discord.rs` | Rich Presence через локальный канал Discord, без сторонних библиотек. |
 | `src/update.rs` | Проверка релизов на GitHub и замена exe на лету. |
 | `ui/theme.slint`, `src/palette.rs` | Сгенерированы `tools/gen_theme.py` и `tools/gen_palette.py` из CSS и JS оригинала. Руками не править. |
@@ -307,10 +358,11 @@ git tag v1.0.1          # версия должна совпадать с Cargo.
 git push origin v1.0.1
 ```
 
-Сборка прогоняет clippy и тесты, собирает `yamusic-rs.exe` и выкладывает его в релиз. На каждый
-push и pull request exe тоже собирается, его можно скачать из артефактов сборки. Встроенная
-обновлялка ищет в релизе файл с именем ровно `yamusic-rs.exe` и сверяет его с `digest`, который
-GitHub считает при загрузке.
+Сборка прогоняет clippy и тесты на Windows и на Linux, собирает `yamusic-rs.exe`, `.deb`, `.rpm`
+и AppImage, а когда обе сборки готовы, создаёт релиз со всеми файлами. На каждый push и pull
+request всё это тоже собирается, файлы можно скачать из артефактов сборки. Встроенная обновлялка
+ищет в релизе файл с именем ровно `yamusic-rs.exe` и сверяет его с `digest`, который GitHub
+считает при загрузке.
 
 ## Лицензия
 
@@ -324,7 +376,7 @@ Copyright © 2026 Spolzer. Код распространяется по лице
 
 ## English
 
-**Yandex Music RS** is an unofficial Yandex Music client for Windows written in Rust. It mirrors the
+**Yandex Music RS** is an unofficial Yandex Music client for Windows and Linux written in Rust. It mirrors the
 official desktop app closely (same fonts, colours, layout and pages), but instead of
 Electron it is a single 26 MB executable that renders its window on the CPU with Slint and Skia.
 Running the same scenario, the official app uses about 850 MB of RAM across 7 processes, and RS
@@ -333,14 +385,20 @@ uses about 65 MB in one process.
 - **Download** `yamusic-rs.exe` from the [latest release](https://github.com/SpolzerMod/yamusic-rs/releases/latest)
   and run it; there is no installer. Sign in with the code shown at [ya.ru/device](https://ya.ru/device).
   The app updates itself from GitHub releases.
-- **Requirements:** Windows 11 (Windows 10 should work but is not tested regularly), a Yandex account,
-  and Yandex Plus for full-length tracks. Linux builds are planned; macOS is not.
-- **Privacy:** the token is encrypted with Windows DPAPI and only sent over HTTPS to `yandex.ru` /
-  `yandex.net`. Besides Yandex, the app only talks to `api.github.com` (update checks) and the local
-  Discord client (optional status). There is no telemetry.
-- **Build:** Rust 1.92+, MSVC Build Tools with the Windows SDK, then `cargo build --release`.
+- **Linux (beta):** the release has a `.deb` (Debian, Ubuntu, Mint), an `.rpm` (Fedora, openSUSE)
+  and an AppImage for everything else; a [`PKGBUILD`](packaging/aur/PKGBUILD) is available for Arch.
+  Needs glibc 2.35 or newer. Sound goes through PipeWire, PulseAudio or ALSA, media keys and
+  the GNOME/KDE player widget work via MPRIS. There is no tray icon yet.
+- **Requirements:** Windows 11 (Windows 10 should work but is not tested regularly) or Linux, a Yandex
+  account, and Yandex Plus for full-length tracks. macOS is not planned.
+- **Privacy:** the token is encrypted with Windows DPAPI or kept in the Linux keyring (Secret Service)
+  and only sent over HTTPS to `yandex.ru` / `yandex.net`. Besides Yandex, the app only talks to
+  `api.github.com` (update checks) and the local Discord client (optional status). There is no telemetry.
+- **Build:** Rust 1.92+, then `cargo build --release`. On Windows you need MSVC Build Tools with the
+  Windows SDK, on Linux a C toolchain and the `-dev` packages listed in the Russian section above.
 - **Bugs:** open an [issue](https://github.com/SpolzerMod/yamusic-rs/issues/new/choose) with the app
-  version, your Windows version and the last lines of `%APPDATA%\yamusic-rs\log.txt`. Security
+  version, your OS version (on Linux also the distro and desktop) and the last lines of
+  `%APPDATA%\yamusic-rs\log.txt` (`~/.config/yamusic-rs/log.txt` on Linux). Security
   problems go to [Report a vulnerability](https://github.com/SpolzerMod/yamusic-rs/security/advisories/new),
   not to public issues.
 
