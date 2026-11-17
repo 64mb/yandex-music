@@ -149,7 +149,11 @@ AppImage монтирует себя через FUSE. Если пишет `Canno
 | Windows на ARM | Должна запускаться через эмуляцию x64. Не проверялась. |
 | Windows 7 и 8.1 | Не поддерживаются: текущий Rust под них не собирает. |
 | **Linux** x86_64 | Бета. Нужна glibc 2.35 или новее: Ubuntu 22.04+, Debian 12+, Mint 21+, Fedora, openSUSE, Arch и другие. Проверено на Ubuntu 22.04, Debian 13, Fedora 45 и Arch, в Wayland и X11. Звук через PipeWire, PulseAudio или ALSA. Медиаклавиши и плеер в панели GNOME и KDE работают через MPRIS. Трея пока нет, поэтому закрытие окна закрывает приложение. О проблемах пишите в [issues](https://github.com/SpolzerMod/yamusic-rs/issues). |
-| macOS | Пока не планируется. |
+| macOS | Не поддерживается. Есть сторонний порт: [rnikitin/yamusic-rs](https://github.com/rnikitin/yamusic-rs), сборка для Apple Silicon и Intel лежит в его [релизах](https://github.com/rnikitin/yamusic-rs/releases). |
+
+> Порт под macOS — отдельный проект. Он основан на коде этого репозитория, но ведётся независимо:
+> этот проект в его разработке не участвует и его сборки не проверяет. За безопасность и работу
+> порта отвечает его автор, вопросы и ошибки по macOS направляйте ему.
 
 **Нужно ещё:**
 - аккаунт Яндекса. Без Плюса сервер отдаёт только 30-секундные отрывки;
@@ -413,7 +417,10 @@ uses about 65 MB in one process.
   Needs glibc 2.35 or newer. Sound goes through PipeWire, PulseAudio or ALSA, media keys and
   the GNOME/KDE player widget work via MPRIS. There is no tray icon yet.
 - **Requirements:** Windows 11 (Windows 10 should work but is not tested regularly) or Linux, a Yandex
-  account, and Yandex Plus for full-length tracks. macOS is not planned.
+  account, and Yandex Plus for full-length tracks. macOS is not supported.
+- **macOS port:** a third-party port is available at [rnikitin/yamusic-rs](https://github.com/rnikitin/yamusic-rs).
+  It is a separate project based on this code. This project does not take part in its development
+  and does not test its builds; its author is responsible for its security and support.
 - **Privacy:** the token is encrypted with Windows DPAPI or kept in the Linux keyring (Secret Service)
   and only sent over HTTPS to `yandex.ru` / `yandex.net`. Besides Yandex, the app only talks to
   `api.github.com` (update checks) and the local Discord client (optional status). There is no telemetry.
