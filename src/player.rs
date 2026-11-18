@@ -156,6 +156,32 @@ impl Player {
 
 }
 
+/// Сколько живёт сессия волны без прослушивания: оригинал начинает новую через 9 часов.
+const WAVE_SESSION_TTL: u64 = 9 * 3600;
+
+struct WaveState {
+    uid: String,
+    session: String,
+    played: Vec<String>,
+    at: u64,
+}
+
+fn load_wave_state() -> Option<WaveState> {
+    let text = std::fs::read_to_string(crate::config::dir().join("wave.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let str_at = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    Some(WaveState {
+        uid: str_at("uid"),
+        session: str_at("session"),
+        played: v
+            .get("played")
+            .and_then(|p| p.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default(),
+        at: v.get("at").and_then(|x| x.as_u64()).unwrap_or(0),
+    })
+}
+
 fn load_track(api: &Api, t: &Track) -> Res<Vec<u8>> {
     let url = api.stream_url(&t.id)?;
     api.fetch_bytes(&url)
@@ -211,6 +237,12 @@ struct Engine {
     deferred: Vec<serde_json::Value>,
     /// Сколько пакетов подряд состояло только из уже сыгранных треков.
     stale_batches: u32,
+    /// Сыгранные треки текущей волны («id:альбом», до 100): уходят серверу как queue, чтобы он не повторялся.
+    played: Vec<String>,
+    /// Станция, к которой относится `played`.
+    played_station: String,
+    /// Сессия «Моей волны» с прошлого запуска уже подхвачена (или не нашлась).
+    wave_restored: bool,
     fetching: bool,
     batch_gen: u64,
     retry_at: Option<Instant>,
@@ -259,6 +291,9 @@ impl Engine {
             radio_started_pending: false,
             deferred: Vec::new(),
             stale_batches: 0,
+            played: Vec::new(),
+            played_station: String::new(),
+            wave_restored: false,
             fetching: false,
             batch_gen: 0,
             retry_at: None,
@@ -404,6 +439,9 @@ impl Engine {
         self.gen += 1;
         self.clear_queue();
         self.history.clear();
+        self.played.clear();
+        self.played_station.clear();
+        self.wave_restored = false;
         self.current = None;
         self.current_bytes = None;
         self.list = None;
@@ -735,17 +773,22 @@ impl Engine {
         let Some(api) = self.api.clone() else { return };
         self.fetching = true;
         self.retry_at = None;
-        // Недавние треки (как queue оригинала): последние из истории, текущий и очередь — «id:альбом».
-        let queue: Vec<String> = self
-            .history
-            .iter()
-            .rev()
-            .take(5)
-            .rev()
-            .chain(self.current.iter())
-            .chain(self.queue.iter())
-            .map(|t| t.full_id())
-            .collect();
+        if self.played_station != station {
+            self.played_station = station.clone();
+            self.played.clear();
+            if station == WAVE {
+                self.restore_wave();
+            }
+        }
+        // queue, как у оригинала: всё, что уже звучало в этой волне, и текущий трек.
+        // Ещё не сыгранные треки сюда не попадают.
+        let mut queue = self.played.clone();
+        if let Some(c) = &self.current {
+            let id = c.full_id();
+            if queue.last() != Some(&id) {
+                queue.push(id);
+            }
+        }
         let session = self.session.clone();
         let feedbacks = std::mem::take(&mut self.deferred);
         let tx = self.tx.clone();
@@ -759,10 +802,15 @@ impl Engine {
 
     fn on_batch(&mut self, b: Batch, replace: bool) {
         self.batch_id = b.batch_id;
-        if !b.session.is_empty() && b.session != self.session {
+        if !b.session.is_empty() {
+            // Сессия могла подхватиться с прошлого запуска — radioStarted нужен и ей.
+            let changed = b.session != self.session;
             self.session = b.session;
             if std::mem::take(&mut self.radio_started_pending) {
                 self.feedback("radioStarted", None, None);
+            }
+            if changed {
+                self.save_wave();
             }
         }
         self.likes.lock().unwrap().extend(b.liked);
@@ -776,7 +824,10 @@ impl Engine {
         // Сервер иногда возвращает недавно сыгранные треки — их пропускаем. Если весь пакет
         // из повторов, просим ещё (до двух раз подряд), а потом берём как есть, чтобы не замолчать.
         let check_history = !replace || self.source == Source::Wave;
-        let skip = |t: &Track| queued(t) || (check_history && self.history.iter().any(|h| h.id == t.id));
+        let played = |t: &Track| {
+            self.history.iter().any(|h| h.id == t.id) || self.played.iter().any(|p| p.split(':').next() == Some(t.id.as_str()))
+        };
+        let skip = |t: &Track| queued(t) || (check_history && played(t));
         let fresh: Vec<Track> = b
             .tracks
             .iter()
@@ -991,7 +1042,59 @@ impl Engine {
         self.errors_in_row = 0;
         self.sh().loading = false;
         self.feedback("trackStarted", Some(&t), None);
+        self.remember_played(&t);
         self.prefetch_next();
+    }
+
+    // ---------- память волны ----------
+
+    fn remember_played(&mut self, t: &Track) {
+        let Some(station) = self.source.station() else { return };
+        if station != self.played_station {
+            return;
+        }
+        let id = t.full_id();
+        self.played.retain(|p| *p != id);
+        self.played.push(id);
+        if self.played.len() > 100 {
+            let n = self.played.len() - 100;
+            self.played.drain(..n);
+        }
+        self.save_wave();
+    }
+
+    /// «Моя волна» после перезапуска продолжается с той же сессии и тем же списком сыгранного.
+    /// Иначе сервер начинает с чистого листа и выдаёт почти то же, что в прошлый раз.
+    fn restore_wave(&mut self) {
+        let first = !std::mem::replace(&mut self.wave_restored, true);
+        let Some(w) = load_wave_state() else { return };
+        if w.uid != self.uid {
+            return;
+        }
+        self.played = w.played;
+        // Сессию берём только при запуске; если сервер её уже закрыл, wave_session начнёт новую.
+        let fresh = crate::config::now_secs().saturating_sub(w.at) < WAVE_SESSION_TTL;
+        if first && fresh && self.session.is_empty() {
+            self.session = w.session;
+        }
+    }
+
+    fn save_wave(&self) {
+        if self.played_station != WAVE || self.source.station() != Some(WAVE) || self.uid.is_empty() {
+            return;
+        }
+        let w = serde_json::json!({
+            "uid": self.uid,
+            "session": self.session,
+            "played": self.played,
+            "at": crate::config::now_secs(),
+        });
+        let _ = self.bg.send(Box::new(move || {
+            let path = crate::config::dir().join("wave.json");
+            if let Err(e) = std::fs::write(&path, w.to_string()) {
+                log(format!("wave.json: {e}"));
+            }
+        }));
     }
 
     fn on_load_error(&mut self, e: String) {
