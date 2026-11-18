@@ -324,14 +324,22 @@ impl Engine {
         (self.notify)();
     }
 
-    fn feedback(&mut self, kind: &'static str, track: Option<String>, played: Option<f64>) {
+    fn feedback(&mut self, kind: &'static str, track: Option<&Track>, played: Option<f64>) {
         let Some(station) = self.source.station().map(String::from) else { return };
         let Some(api) = self.api.clone() else { return };
         if self.session.is_empty() && kind == "radioStarted" {
             self.radio_started_pending = true;
             return;
         }
-        let batch = self.batch_id.clone();
+        // Фидбек идёт с пакетом самого трека: следующий пакет часто приходит, пока доигрывает прошлый.
+        let batch = track
+            .map(|t| t.batch_id.clone())
+            .filter(|b| !b.is_empty())
+            .unwrap_or_else(|| self.batch_id.clone());
+        let length = track
+            .filter(|t| kind == "trackFinished" && t.duration_ms > 0)
+            .map(|t| t.duration_ms as f64 / 1000.0);
+        let track = track.map(|t| t.full_id());
         let session = self.session.clone();
         if session.is_empty() {
             let _ = self.bg.send(Box::new(move || {
@@ -342,7 +350,7 @@ impl Engine {
             return;
         }
         let from = format!("desktop_win-radio-{}-default", station.replace(':', "-"));
-        let body = crate::api::session_event(kind, track.as_deref(), played, &batch, &from);
+        let body = crate::api::session_event(kind, track.as_deref(), played, length, &batch, &from);
         if matches!(kind, "skip" | "dislike" | "trackFinished") {
             self.deferred.push(body);
             return;
@@ -623,8 +631,8 @@ impl Engine {
                 if tracks.is_empty() {
                     return;
                 }
-                if let (Some(cur), true) = (self.current.as_ref(), self.loaded) {
-                    self.feedback("skip", Some(cur.full_id()), Some(self.pos() as f64));
+                if let (Some(cur), true) = (self.current.clone(), self.loaded) {
+                    self.feedback("skip", Some(&cur), Some(self.pos() as f64));
                 }
                 self.clear_queue();
                 let start = start.min(tracks.len() - 1);
@@ -811,7 +819,7 @@ impl Engine {
                     End::Skip => "skip",
                     End::Dislike => "dislike",
                 };
-                self.feedback(kind, Some(cur.full_id()), Some(played));
+                self.feedback(kind, Some(&cur), Some(played));
             }
             self.history.push(cur);
             self.trim_history();
@@ -982,7 +990,7 @@ impl Engine {
         self.loaded = true;
         self.errors_in_row = 0;
         self.sh().loading = false;
-        self.feedback("trackStarted", Some(t.full_id()), None);
+        self.feedback("trackStarted", Some(&t), None);
         self.prefetch_next();
     }
 

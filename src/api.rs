@@ -55,6 +55,8 @@ pub struct Track {
     pub album_title: String,
     pub year: Option<u32>,
     pub position: Option<u32>,
+    /// Пакет волны, из которого пришёл трек: с ним уходит фидбек по этому треку.
+    pub batch_id: String,
 }
 
 impl Track {
@@ -271,6 +273,7 @@ pub(crate) fn parse_track(v: &Value) -> Option<Track> {
         album_title: album.map(|a| str_of(a, "title")).unwrap_or_default(),
         year: album.and_then(|a| a.get("year")).and_then(|y| y.as_u64()).map(|y| y as u32),
         position: album.and_then(|a| a.pointer("/trackPosition/index")).and_then(|y| y.as_u64()).map(|y| y as u32),
+        batch_id: String::new(),
     })
 }
 
@@ -370,7 +373,14 @@ fn iso_now() -> String {
 }
 
 /// Фидбек сессии ротора: radioStarted / trackStarted / trackFinished / skip.
-pub fn session_event(kind: &str, track: Option<&str>, played: Option<f64>, batch_id: &str, from: &str) -> Value {
+pub fn session_event(
+    kind: &str,
+    track: Option<&str>,
+    played: Option<f64>,
+    length: Option<f64>,
+    batch_id: &str,
+    from: &str,
+) -> Value {
     let mut event = json!({ "type": kind, "timestamp": iso_now() });
     if kind == "radioStarted" {
         event["from"] = json!(from);
@@ -380,6 +390,9 @@ pub fn session_event(kind: &str, track: Option<&str>, played: Option<f64>, batch
     }
     if let Some(p) = played {
         event["totalPlayedSeconds"] = json!(p);
+    }
+    if let Some(l) = length {
+        event["trackLengthSeconds"] = json!(l);
     }
     let mut body = json!({ "event": event, "from": from });
     if !batch_id.is_empty() && kind != "radioStarted" {
@@ -393,7 +406,8 @@ fn parse_batch(v: &Value, session: String) -> Res<Batch> {
     let mut tracks = Vec::new();
     let mut liked = Vec::new();
     for it in v.get("sequence").and_then(|s| s.as_array()).into_iter().flatten() {
-        if let Some(t) = it.get("track").and_then(parse_track) {
+        if let Some(mut t) = it.get("track").and_then(parse_track) {
+            t.batch_id = batch_id.clone();
             if it.get("liked").and_then(|x| x.as_bool()) == Some(true) {
                 liked.push(t.id.clone());
             }
