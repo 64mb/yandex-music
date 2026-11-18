@@ -754,6 +754,20 @@ impl Engine {
                 let _ = tx.send(Msg::Error(format!("Лайк не сохранился: {e}")));
             }
         }));
+        // Лайк трека из волны оригинал сообщает и самой волне, чтобы она его учла.
+        if self.session.is_empty() {
+            return;
+        }
+        let in_wave = self
+            .current
+            .iter()
+            .chain(self.queue.iter())
+            .chain(self.history.iter())
+            .find(|w| w.id == t.id && !w.batch_id.is_empty())
+            .cloned();
+        if let Some(w) = in_wave {
+            self.feedback(if remove { "unlike" } else { "like" }, Some(&w), None);
+        }
     }
 
     // ---------- очередь ----------
