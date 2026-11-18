@@ -206,6 +206,8 @@ enum End {
     Finished,
     Skip,
     Dislike,
+    /// Волну запустили заново: пропуск, но очередь уже свежая.
+    Restart,
 }
 
 struct ListPlay {
@@ -692,12 +694,17 @@ impl Engine {
                 }
                 let skipped: Vec<Track> = self.queue.drain(..i).collect();
                 if let Some(cur) = self.current.take() {
+                    if self.loaded {
+                        self.feedback("skip", Some(&cur), Some(self.pos() as f64));
+                    }
                     self.history.push(cur);
                 }
                 self.history.extend(skipped);
                 self.trim_history();
                 self.stop_audio();
                 self.play_from_queue();
+                self.refresh_wave();
+                self.flush_feedback();
             }
             Cmd::Repeat(r) => self.repeat = r,
             Cmd::Enqueue { track, next } => {
@@ -846,7 +853,7 @@ impl Engine {
         self.stale_batches = 0;
         self.queue.extend(tracks);
         if replace {
-            self.advance(End::Skip);
+            self.advance(End::Restart);
         } else if self.current.is_none() {
             self.play_from_queue();
         } else if self.loaded {
@@ -867,7 +874,7 @@ impl Engine {
                 let played = self.pos() as f64;
                 let kind = match end {
                     End::Finished => "trackFinished",
-                    End::Skip => "skip",
+                    End::Skip | End::Restart => "skip",
                     End::Dislike => "dislike",
                 };
                 self.feedback(kind, Some(&cur), Some(played));
@@ -877,7 +884,28 @@ impl Engine {
         }
         self.stop_audio();
         self.play_from_queue();
+        if matches!(end, End::Skip | End::Dislike) {
+            self.refresh_wave();
+        }
         self.flush_feedback();
+    }
+
+    /// Пропуск в волне, как у оригинала: ещё не сыгранные треки волны убираем и сразу просим
+    /// новые, а пропуск уходит в том же запросе. Так волна подстраивается сразу, а не через пакет.
+    /// Треки, добавленные вручную, и уже сыгранные (после «назад») остаются.
+    fn refresh_wave(&mut self) {
+        if self.list.is_some() || self.source.station().is_none() || self.session.is_empty() {
+            return;
+        }
+        let played = &self.played;
+        self.queue
+            .retain(|t| t.batch_id.is_empty() || played.iter().any(|p| p.split(':').next() == Some(t.id.as_str())));
+        if let Some((id, _)) = &self.prefetch {
+            if !self.queue.iter().any(|t| t.id == *id) {
+                self.prefetch = None;
+            }
+        }
+        self.fetch_batch();
     }
 
     /// Список закончился: по кругу (исполнитель) или волна по нему (плейлист, альбом).
@@ -939,6 +967,9 @@ impl Engine {
         }
         if let Some(p) = self.history.pop() {
             if let Some(c) = self.current.take() {
+                if self.loaded {
+                    self.feedback("skip", Some(&c), Some(self.pos() as f64));
+                }
                 self.queue.push_front(c);
             }
             self.stop_audio();
