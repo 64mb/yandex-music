@@ -136,6 +136,9 @@ export global T {
 export global App {
     in-out property <Page> page: Page.wave;
     in property <bool> maximized;
+    // Слой на всё окно на один кадр: Slint перерисовывает место, где элемент появился и исчез,
+    // так окно рисуется целиком после переноса на другой монитор.
+    in property <bool> repaint;
     in property <string> toast;
     in property <image> toast-cover;
     in property <bool> toast-has-cover;

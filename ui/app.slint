@@ -393,4 +393,13 @@ export component AppWindow inherits Window {
         width: parent.width;
         height: parent.height;
     }
+
+    // Почти прозрачный фон обязателен: пустой Rectangle Slint не рисует и место не обновит.
+    if App.repaint: Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: #00000001;
+    }
 }

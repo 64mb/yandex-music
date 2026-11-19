@@ -1073,6 +1073,13 @@ impl Ctx {
 /// Масштаб как у оригинала: начиная с 1920 CSS-пикселей ширины корневой шрифт
 /// `0.75rem + 0.3vw`, и всё, что задано в rem, растёт вместе с ним.
 fn apply_ui_scale(ui: &AppWindow) {
+    rescale(ui, false);
+}
+
+/// `force` — после переноса на монитор с другим масштабом: размер и масштаб окна пересылаются
+/// Slint заново, даже если масштаб совпал, и окно перерисовывается целиком. Иначе после
+/// переноса могла остаться недорисованная часть окна (#16).
+fn rescale(ui: &AppWindow, force: bool) {
     let w = ui.window();
     let phys = w.size();
     if phys.width == 0 || phys.height == 0 {
@@ -1084,11 +1091,46 @@ fn apply_ui_scale(ui: &AppWindow) {
     let target = base * k;
     ui.global::<App>().set_ui_scale(k);
     ui.global::<App>().set_dpr(target);
-    if (w.scale_factor() - target).abs() < 0.001 {
+    if !force && (w.scale_factor() - target).abs() < 0.001 {
         return;
     }
     w.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: target });
     w.dispatch_event(slint::platform::WindowEvent::Resized { size: phys.to_logical(target) });
+    if force {
+        full_repaint(ui);
+    }
+}
+
+/// Перерисовать окно целиком, а не только изменившиеся места. Кадр выводится в окно через GDI,
+/// и часть окна за краем экрана при этом отсекается: если окно потом вернуть на экран, там
+/// осталась бы пустота или старый кадр (#16).
+fn full_repaint(ui: &AppWindow) {
+    ui.global::<App>().set_repaint(true);
+    let weak = ui.as_weak();
+    Timer::single_shot(Duration::from_millis(50), move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<App>().set_repaint(false);
+        }
+    });
+}
+
+thread_local! {
+    static MOVED: Timer = Timer::default();
+}
+
+/// Окно сдвинули: перерисовать целиком, когда его перестанут двигать.
+fn after_move() {
+    MOVED.with(|t| {
+        t.start(TimerMode::SingleShot, Duration::from_millis(150), || with_ctx(|c| full_repaint(&c.ui())));
+    });
+}
+
+/// Окно перенесли на монитор с другим масштабом. Пока его тащат, Windows может прислать
+/// смену масштаба несколько раз, поэтому пересчёт ещё раз — когда всё уляжется.
+fn after_dpi_change() {
+    for ms in [0, 300] {
+        Timer::single_shot(Duration::from_millis(ms), || with_ctx(|c| rescale(&c.ui(), true)));
+    }
 }
 
 /// Чат поддержки, как `createSupportChatUrl` оригинала.
@@ -1778,6 +1820,14 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Forward, .. } => {
                 with_ctx(|c| c.go_forward());
                 EventResult::PreventDefault
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                after_dpi_change();
+                EventResult::Propagate
+            }
+            WindowEvent::Moved(_) => {
+                after_move();
+                EventResult::Propagate
             }
             _ => EventResult::Propagate,
         }
