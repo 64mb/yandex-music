@@ -148,6 +148,8 @@ export global App {
     callback update-changes();
     // «Проверять обновления» в настройках.
     in property <bool> check-updates: true;
+    // «Треки 18+» в меню профиля.
+    in property <bool> allow-explicit: true;
     // Подсказка у значка «!»: текст дисклеймера рядом с курсором.
     in property <string> hint-text: "Возрастное ограничение 18+";
     in-out property <bool> hint-open;

@@ -45,6 +45,8 @@ pub struct Config {
     pub hidden_blocks: Vec<HiddenBlock>,
     /// Раз в полчаса спрашивать GitHub о новой версии.
     pub check_updates: bool,
+    /// «Треки 18+» в меню профиля.
+    pub allow_explicit: bool,
 }
 
 /// Блок запоминается по id из скелета: он постоянный («recommended_playlists»), а заголовок
@@ -79,6 +81,7 @@ impl Default for Config {
             download_dir: String::new(),
             hidden_blocks: Vec::new(),
             check_updates: true,
+            allow_explicit: true,
         }
     }
 }

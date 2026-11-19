@@ -1407,6 +1407,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     crate::update::ENABLED.store(cfg.check_updates, Ordering::Relaxed);
     start_updates(&ui);
 
+    crate::api::ALLOW_EXPLICIT.store(cfg.allow_explicit, Ordering::Relaxed);
     let player = Player::spawn(notifier());
     player.send(Cmd::Volume(cfg.volume));
     if let Some(t) = cfg.token.clone() {
@@ -1431,6 +1432,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.set_discord_on(cfg.discord_enabled);
     app.set_autostart(sys::autostart_enabled());
     app.set_check_updates(cfg.check_updates);
+    app.set_allow_explicit(cfg.allow_explicit);
     app.set_linux(cfg!(target_os = "linux"));
     app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
@@ -2541,6 +2543,15 @@ impl Ctx {
                 st.cfg.save();
             }
             ui.global::<Theme>().set_dark(app.get_page() == Page::Wave || dark);
+            return;
+        }
+        if id == "explicit" {
+            let allow = !app.get_allow_explicit();
+            app.set_allow_explicit(allow);
+            self.player.send(Cmd::AllowExplicit(allow));
+            let mut st = self.st.borrow_mut();
+            st.cfg.allow_explicit = allow;
+            st.cfg.save();
             return;
         }
         app.set_account_open(false);

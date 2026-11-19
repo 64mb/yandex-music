@@ -104,6 +104,8 @@ pub enum Cmd {
     Shuffle(bool),
     /// «Играть следующим» (`next`) или «Добавить в конец очереди».
     Enqueue { track: Track, next: bool },
+    /// Переключатель «Треки 18+».
+    AllowExplicit(bool),
 }
 
 enum Msg {
@@ -718,6 +720,7 @@ impl Engine {
                     self.queue.push_back(track);
                 }
             }
+            Cmd::AllowExplicit(allow) => self.set_allow_explicit(allow),
             Cmd::Shuffle(on) => {
                 self.shuffle = on;
                 if self.list.is_some() {
@@ -848,7 +851,8 @@ impl Engine {
         let played = |t: &Track| {
             self.history.iter().any(|h| h.id == t.id) || self.played.iter().any(|p| p.split(':').next() == Some(t.id.as_str()))
         };
-        let skip = |t: &Track| queued(t) || (check_history && played(t));
+        let no_explicit = !crate::api::allow_explicit();
+        let skip = |t: &Track| queued(t) || (check_history && played(t)) || (no_explicit && t.explicit);
         let fresh: Vec<Track> = b
             .tracks
             .iter()
@@ -943,7 +947,47 @@ impl Engine {
         }
     }
 
+    /// Как у оригинала при смене настроек волны: текущий трек доигрывает (если он не 18+, а их
+    /// выключили), а несыгранные треки волны заменяет новая сессия уже с этим флагом.
+    fn set_allow_explicit(&mut self, allow: bool) {
+        crate::api::ALLOW_EXPLICIT.store(allow, std::sync::atomic::Ordering::Relaxed);
+        let wave = self.list.is_none() && self.source.station().is_some();
+        let skip_current = !allow && self.current.as_ref().is_some_and(|t| t.explicit);
+        if wave {
+            self.queue.retain(|t| t.batch_id.is_empty());
+        }
+        if !allow {
+            self.queue.retain(|t| !t.explicit);
+        }
+        self.prefetch = None;
+        if skip_current {
+            if let Some(cur) = self.current.take() {
+                if self.loaded {
+                    self.feedback("skip", Some(&cur), Some(self.pos() as f64));
+                }
+                self.history.push(cur);
+                self.trim_history();
+            }
+            self.stop_audio();
+        }
+        if wave {
+            self.flush_feedback();
+            self.session.clear();
+            self.fetching = false;
+            self.batch_gen += 1;
+        }
+        if skip_current {
+            self.play_from_queue();
+        }
+        if wave {
+            self.fetch_batch();
+        }
+    }
+
     fn play_from_queue(&mut self) {
+        if !crate::api::allow_explicit() {
+            self.queue.retain(|t| !t.explicit);
+        }
         if self.queue.is_empty() && self.list.is_some() {
             match (&self.list, self.repeat) {
                 (Some(l), Repeat::All) => {

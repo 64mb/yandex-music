@@ -348,6 +348,14 @@ static LANG: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 /// «Меньше ИИ»: оригинал шлёт его заголовком в запросах сессий ротора.
 pub static LESS_AI: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// «Треки 18+»: выключено — новая сессия волны просит без них (`allowExplicit`), а плеер
+/// пропускает треки с пометкой E, как оригинал с фильтром очереди.
+pub static ALLOW_EXPLICIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn allow_explicit() -> bool {
+    ALLOW_EXPLICIT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Время для фидбека сессий — ISO 8601 в UTC, как `new Date().toISOString()`.
 fn iso_now() -> String {
     let d = now();
@@ -1204,6 +1212,9 @@ impl Api {
         }
         if LESS_AI.load(std::sync::atomic::Ordering::Relaxed) {
             body["aiContentReductionEnabled"] = json!(true);
+        }
+        if !allow_explicit() {
+            body["allowExplicit"] = json!(false);
         }
         let v = self.session_req("/rotor/session/new", &body)?;
         let id = str_of(&v, "radioSessionId");
