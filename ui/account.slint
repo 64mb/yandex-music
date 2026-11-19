@@ -383,6 +383,13 @@ export component SettingsPage inherits Rectangle {
                 clicked => { App.setting("autostart"); }
             }
             SettingItem {
+                title: T.t("Проверять обновления");
+                desc: T.t("Раз в полчаса спрашивать GitHub, нет ли новой версии");
+                toggle: true;
+                on: App.check-updates;
+                clicked => { App.setting("check-updates"); }
+            }
+            SettingItem {
                 title: T.t("Выйти из аккаунта");
                 desc: App.login;
                 clicked => { App.setting("logout"); }

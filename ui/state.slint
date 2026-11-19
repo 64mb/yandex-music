@@ -144,6 +144,10 @@ export global App {
     // Установщик скачивается.
     in property <bool> update-busy;
     callback update-install();
+    // «Что изменилось»: сравнение запущенной и новой версии на GitHub.
+    callback update-changes();
+    // «Проверять обновления» в настройках.
+    in property <bool> check-updates: true;
     // Подсказка у значка «!»: текст дисклеймера рядом с курсором.
     in property <string> hint-text: "Возрастное ограничение 18+";
     in-out property <bool> hint-open;

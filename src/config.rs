@@ -43,6 +43,8 @@ pub struct Config {
     pub download_dir: String,
     /// Блоки главной и «Книг и подкастов», которые скрыл пользователь.
     pub hidden_blocks: Vec<HiddenBlock>,
+    /// Раз в полчаса спрашивать GitHub о новой версии.
+    pub check_updates: bool,
 }
 
 /// Блок запоминается по id из скелета: он постоянный («recommended_playlists»), а заголовок
@@ -76,6 +78,7 @@ impl Default for Config {
             mode: "smooth".into(),
             download_dir: String::new(),
             hidden_blocks: Vec::new(),
+            check_updates: true,
         }
     }
 }

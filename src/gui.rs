@@ -1175,6 +1175,10 @@ fn start_updates(ui: &AppWindow) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(10));
         loop {
+            if !crate::update::ENABLED.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_secs(60));
+                continue;
+            }
             match crate::update::check() {
                 Ok(Some(r)) => {
                     let weak = weak.clone();
@@ -1189,6 +1193,11 @@ fn start_updates(ui: &AppWindow) {
                 Err(e) => log(format!("обновления: {e}")),
             }
             std::thread::sleep(crate::update::POLL);
+        }
+    });
+    ui.global::<App>().on_update_changes(|| {
+        if let Some(r) = UPDATE.with(|u| u.borrow().clone()) {
+            sys::open_url(&crate::update::changes_url(&r.version));
         }
     });
     ui.global::<App>().on_update_install(|| {
@@ -1395,6 +1404,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         set_icons(&ui, sprite);
     }
     load_id_icons(&ui);
+    crate::update::ENABLED.store(cfg.check_updates, Ordering::Relaxed);
     start_updates(&ui);
 
     let player = Player::spawn(notifier());
@@ -1420,6 +1430,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     );
     app.set_discord_on(cfg.discord_enabled);
     app.set_autostart(sys::autostart_enabled());
+    app.set_check_updates(cfg.check_updates);
     app.set_linux(cfg!(target_os = "linux"));
     app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
@@ -2606,6 +2617,18 @@ impl Ctx {
                 } else {
                     self.toast("Не удалось изменить автозапуск");
                 }
+            }
+            "check-updates" => {
+                let on = !app.get_check_updates();
+                app.set_check_updates(on);
+                crate::update::ENABLED.store(on, Ordering::Relaxed);
+                if !on {
+                    app.set_update_version(SharedString::new());
+                    UPDATE.with(|u| *u.borrow_mut() = None);
+                }
+                let mut st = self.st.borrow_mut();
+                st.cfg.check_updates = on;
+                st.cfg.save();
             }
             "logout" => self.logout(),
             _ => {}
