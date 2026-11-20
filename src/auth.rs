@@ -5,6 +5,9 @@ use crate::client::{OAUTH_BASE, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET};
 use serde_json::Value;
 use std::time::Duration;
 
+/// Права токена, которые просим при входе.
+const SCOPE: &str = "music:content music:read music:write";
+
 pub struct DeviceCode {
     pub device_code: String,
     pub user_code: String,
@@ -64,7 +67,10 @@ pub fn device_code() -> Result<DeviceCode, String> {
     let host = crate::sys::hostname().unwrap_or_else(|| "PC".into());
     // Это имя Яндекс показывает при вводе кода и в списке устройств аккаунта.
     let name = format!("{} ({host})", env!("APP_NAME"));
-    let v = post(&[("client_id", OAUTH_CLIENT_ID), ("device_id", &id), ("device_name", &name)], "/device/code")?;
+    let v = post(
+        &[("client_id", OAUTH_CLIENT_ID), ("device_id", &id), ("device_name", &name), ("scope", SCOPE)],
+        "/device/code",
+    )?;
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
     let n = |k: &str| v.get(k).and_then(|x| x.as_u64());
     match (s("device_code"), s("user_code")) {
