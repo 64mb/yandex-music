@@ -534,7 +534,7 @@ impl Engine {
         }
     }
 
-    /// Трек начал звучать: новое прослушивание.
+    /// Трек стал текущим: новое прослушивание. Время слушания идёт, только когда трек звучит.
     fn begin_listen(&mut self, track: &Track, repeated: bool) {
         let ctx = self.play_context();
         let radio = ctx.context == "radio";
@@ -546,7 +546,7 @@ impl Engine {
             add_time: format!("{:016}-{}", random_u128() % 10_000_000_000_000_000, ms.div_ceil(1000)),
             start: crate::api::iso_now(),
             played: 0.0,
-            since: (!self.paused).then(Instant::now),
+            since: (self.loaded && !self.paused).then(Instant::now),
             pause: false,
             // В волне оригинал всегда шлёт seek: при старте трека плеер ставит его на начало.
             seek: radio,
@@ -1191,7 +1191,8 @@ impl Engine {
 
     fn resume(&mut self) {
         self.paused = false;
-        if let Some(l) = &mut self.listen {
+        let loaded = self.loaded;
+        if let Some(l) = self.listen.as_mut().filter(|_| loaded) {
             l.go();
         }
         if self.current.is_none() {
@@ -1279,6 +1280,10 @@ impl Engine {
         self.listen = None;
         self.current_bytes = None;
         let Some(t) = self.current.clone() else { return };
+        // Как у оригинала, трек начат сразу, а не когда докачался: иначе пропуск до загрузки
+        // не доходит до волны, и она отдаёт этот трек снова.
+        self.begin_listen(&t, false);
+        self.feedback("trackStarted", Some(&t), None);
         {
             let mut s = self.sh();
             s.track = Some(t.clone());
@@ -1362,8 +1367,9 @@ impl Engine {
         self.loaded = true;
         self.errors_in_row = 0;
         self.sh().loading = false;
-        self.begin_listen(&t, false);
-        self.feedback("trackStarted", Some(&t), None);
+        if let Some(l) = self.listen.as_mut().filter(|_| !paused) {
+            l.go();
+        }
         self.remember_wave(&t);
         self.prefetch_next();
     }
@@ -1420,6 +1426,7 @@ impl Engine {
         self.errors_in_row += 1;
         let name = self.current.as_ref().map(|t| t.title.clone()).unwrap_or_default();
         self.error(format!("«{name}» не загрузился: {e}"));
+        self.listen = None;
         if self.errors_in_row < 5 {
             self.current = None;
             self.stop_audio();
