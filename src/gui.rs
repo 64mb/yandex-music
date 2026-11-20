@@ -1114,6 +1114,31 @@ fn full_repaint(ui: &AppWindow) {
     });
 }
 
+#[cfg(target_os = "linux")]
+thread_local! {
+    static LAST_CURSOR: std::cell::Cell<slint::LogicalPosition> = const { std::cell::Cell::new(slint::LogicalPosition::new(0.0, 0.0)) };
+}
+
+/// На Linux окно двигает и тянет за край сам композитор, и отпускание кнопки до нас не доходит.
+/// Slint так и считает левую зажатой и отдаёт все клики полосе заголовка, а та снова начинает
+/// перетаскивание (#17). Отпускаем кнопку за него. Не прямо здесь: мы внутри обработки нажатия.
+fn release_after_system_drag(ui: &AppWindow) {
+    #[cfg(target_os = "linux")]
+    {
+        let weak = ui.as_weak();
+        Timer::single_shot(Duration::ZERO, move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.window().dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                    position: LAST_CURSOR.get(),
+                    button: slint::platform::PointerEventButton::Left,
+                });
+            }
+        });
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = ui;
+}
+
 thread_local! {
     static MOVED: Timer = Timer::default();
 }
@@ -1708,6 +1733,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
             ui.window().with_winit_window(|w| {
                 let _ = w.drag_window();
             });
+            release_after_system_drag(&ui);
         }
     });
     let weak = ui.as_weak();
@@ -1760,6 +1786,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
             ui.window().with_winit_window(|w| {
                 let _ = w.drag_resize_window(d);
             });
+            release_after_system_drag(&ui);
         }
     });
     let weak = ui.as_weak();
@@ -1806,10 +1833,16 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         install_mpris(&ui, &player);
     }
 
-    ui.window().on_winit_window_event(|_, ev| {
+    ui.window().on_winit_window_event(|_w, ev| {
         use slint::winit_030::EventResult;
         use winit::event::{ElementState, MouseButton, WindowEvent};
         match ev {
+            #[cfg(target_os = "linux")]
+            WindowEvent::CursorMoved { position, .. } => {
+                let p = position.to_logical::<f32>(_w.scale_factor() as f64);
+                LAST_CURSOR.set(slint::LogicalPosition::new(p.x, p.y));
+                EventResult::Propagate
+            }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Back, .. } => {
                 with_ctx(|c| c.go_back());
                 EventResult::PreventDefault
