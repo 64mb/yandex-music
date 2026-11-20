@@ -1746,16 +1746,34 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         let app = ui.global::<App>();
         let w = ui.window();
         if !app.get_mini() {
-            normal.set(Some((w.position(), w.size(), w.is_maximized())));
+            let was_max = w.is_maximized();
+            normal.set(Some((w.position(), w.size(), was_max)));
             app.set_mini(true);
             app.set_maximized(false);
-            w.set_maximized(false);
+            // KWin в ответ на set_maximized(false) присылает текущий размер и перебивает размер плашки.
+            if was_max {
+                w.set_maximized(false);
+            }
             // Slint обновит ограничения размера только на следующем кадре, а Windows без этого не даст ужать окно.
             w.with_winit_window(|ww| {
-                ww.set_maximized(false);
+                if was_max {
+                    ww.set_maximized(false);
+                }
                 ww.set_min_inner_size(Some(LogicalSize::new(320.0, 88.0)));
             });
             w.set_size(slint::LogicalSize::new(400.0, 88.0));
+            // Композитор на Linux возвращает размер развёрнутого окна уже после нашего запроса.
+            #[cfg(target_os = "linux")]
+            {
+                let weak = weak.clone();
+                Timer::single_shot(Duration::from_millis(150), move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    let w = ui.window();
+                    if ui.global::<App>().get_mini() && w.size().height as f32 > 120.0 * w.scale_factor() {
+                        w.set_size(slint::LogicalSize::new(400.0, 88.0));
+                    }
+                });
+            }
             let k = w.scale_factor();
             let (mw, mh, gap) = ((400.0 * k) as i32, (88.0 * k) as i32, (16.0 * k) as i32);
             let (l, t, r, b) = sys::work_area(w);
