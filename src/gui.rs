@@ -2262,6 +2262,12 @@ impl Ctx {
         self.player.send(Cmd::Logout);
         {
             let mut st = self.st.borrow_mut();
+            if let Some(token) = st.cfg.token.clone() {
+                std::thread::spawn(move || match crate::auth::revoke(&token) {
+                    Ok(()) => log("выход: токен отозван"),
+                    Err(e) => log(format!("выход: токен не отозван: {e}")),
+                });
+            }
             st.cfg.forget_token();
             st.cfg.forget_refresh();
             st.cfg.token_expires = None;

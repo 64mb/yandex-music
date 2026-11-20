@@ -117,6 +117,19 @@ pub fn poll(device_code: &str) -> Poll {
     }
 }
 
+/// Отозвать токен на сервере. Яндекс отзывает только токены, выданные с device_id.
+pub fn revoke(access: &str) -> Result<(), String> {
+    let v = post(
+        &[("access_token", access), ("client_id", OAUTH_CLIENT_ID), ("client_secret", OAUTH_CLIENT_SECRET)],
+        "/revoke_token",
+    )?;
+    if v.get("status").and_then(|s| s.as_str()) == Some("ok") {
+        Ok(())
+    } else {
+        Err(v.get("error_description").and_then(|e| e.as_str()).unwrap_or("Яндекс не отозвал токен").to_string())
+    }
+}
+
 /// Продлить токен по refresh_token, пока старый не истёк.
 pub fn refresh(refresh_token: &str) -> Result<Token, String> {
     let v = post(
