@@ -891,6 +891,11 @@ impl Engine {
                 if tracks.is_empty() {
                     return;
                 }
+                // Играть нечего: текущий трек не трогаем, а говорим, почему ничего не включилось.
+                if !crate::api::allow_explicit() && tracks.iter().all(|t| t.explicit) {
+                    self.error("Здесь только треки 18+. Их можно включить в меню профиля");
+                    return;
+                }
                 self.end_current(Some("skip"), true, "other_track");
                 self.clear_queue();
                 let start = start.min(tracks.len() - 1);
@@ -1476,16 +1481,18 @@ fn explicit_filter_survives_repeat_and_previous() {
     engine.set_allow_explicit(true);
     engine.cmd(Cmd::PlayPause);
     let resumed = engine.current.take().map(|t| t.id);
-    let mut first = engine.list.as_ref().unwrap().all[0].clone();
-    first.id = "3".into();
-    let second = engine.list.as_ref().unwrap().all[0].clone();
-    engine.set_allow_explicit(false);
-    engine.cmd(Cmd::PlayList { source: Source::Wave, tracks: vec![first, second], start: 1, after: After::Loop });
-    engine.set_allow_explicit(true);
-    engine.cmd(Cmd::Resume);
-    let selected = engine.current.as_ref().map(|t| t.id.clone());
+    // Список только из 18+ при выключенном фильтре не включается и не трогает текущий трек.
+    crate::api::ALLOW_EXPLICIT.store(false, std::sync::atomic::Ordering::Relaxed);
+    let kept = engine.list.as_ref().unwrap().all[0].clone();
+    let mut other = kept.clone();
+    other.id = "3".into();
+    engine.current = Some(kept.clone());
+    engine.cmd(Cmd::PlayList { source: Source::Wave, tracks: vec![other, kept], start: 1, after: After::Loop });
+    let still = engine.current.as_ref().map(|t| t.id.clone());
+    let told = engine.sh().error.is_some();
     crate::api::ALLOW_EXPLICIT.store(previous, std::sync::atomic::Ordering::Relaxed);
-    assert_eq!(selected.as_deref(), Some("1"));
+    assert_eq!(still.as_deref(), Some("1"));
+    assert!(told);
     assert_eq!(resumed.as_deref(), Some("1"));
     assert_eq!(repeated.as_deref(), Some("2"));
     assert_eq!(previous_track, "2");
