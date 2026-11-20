@@ -252,6 +252,15 @@ fn round3(x: f64) -> f64 {
 /// Трек, который качается, и декодер, уже прочитавший его начало.
 type Audio = (Arc<Buf>, Decoder<Reader>);
 
+/// Имя выхода Windows по умолчанию. На Linux звук идёт в «default», и за сменой устройства
+/// там следит PipeWire или PulseAudio.
+#[cfg(windows)]
+fn default_output_name() -> Option<String> {
+    use rodio::cpal::traits::HostTrait;
+    use rodio::DeviceTrait;
+    rodio::cpal::default_host().default_output_device()?.name().ok()
+}
+
 fn load_track(api: &Api, t: &Track) -> Res<Audio> {
     let url = api.stream_url(&t.id)?;
     let buf = Buf::download(api.open(&url)?);
@@ -296,6 +305,13 @@ struct Engine {
     notify: Notify,
     eq: Arc<EqParams>,
     audio: Option<(OutputStream, Sink)>,
+    /// Выход Windows по умолчанию, на котором открыт звук, и когда его последний раз сверяли.
+    #[cfg(windows)]
+    out_name: Option<String>,
+    #[cfg(windows)]
+    out_checked: Instant,
+    /// Выход пропал посреди трека: с этого места трек продолжится по Play.
+    held_pos: Option<f32>,
     api: Option<Api>,
     uid: String,
     source: Source,
@@ -355,6 +371,11 @@ impl Engine {
             notify,
             eq,
             audio: None,
+            #[cfg(windows)]
+            out_name: None,
+            #[cfg(windows)]
+            out_checked: Instant::now(),
+            held_pos: None,
             api: None,
             uid: String::new(),
             source: Source::Wave,
@@ -417,7 +438,13 @@ impl Engine {
         if self.audio.is_none() {
             match OutputStream::try_default() {
                 Ok((stream, handle)) => match Sink::try_new(&handle) {
-                    Ok(sink) => self.audio = Some((stream, sink)),
+                    Ok(sink) => {
+                        self.audio = Some((stream, sink));
+                        #[cfg(windows)]
+                        {
+                            self.out_name = default_output_name();
+                        }
+                    }
                     Err(e) => log(format!("sink: {e}")),
                 },
                 Err(e) => log(format!("audio device: {e}")),
@@ -427,7 +454,66 @@ impl Engine {
     }
 
     fn pos(&self) -> f32 {
-        self.sink().map(|s| s.get_pos().as_secs_f32()).unwrap_or(0.0)
+        match self.sink() {
+            Some(s) => s.get_pos().as_secs_f32(),
+            None => self.held_pos.unwrap_or(0.0),
+        }
+    }
+
+    /// Звук открыт на одном устройстве и сам за выходом Windows не переходит. Раз в секунду
+    /// сверяем выход по умолчанию: сменился или пропал — переоткрываем.
+    #[cfg(windows)]
+    fn check_output(&mut self) {
+        if self.audio.is_none() || self.out_checked.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.out_checked = Instant::now();
+        let now = default_output_name();
+        if now == self.out_name {
+            return;
+        }
+        log(format!("аудиовыход: {} → {}", self.out_name.as_deref().unwrap_or("нет"), now.as_deref().unwrap_or("нет")));
+        let pos = self.pos();
+        self.audio = None;
+        self.out_name = None;
+        if !self.loaded {
+            return;
+        }
+        if now.is_none() || !self.restore_at(pos) {
+            // Выхода нет: трек встаёт на паузу и ждёт Play с того же места.
+            self.held_pos = Some(pos);
+            if !self.paused {
+                self.paused = true;
+                if let Some(l) = &mut self.listen {
+                    l.stop();
+                    l.pause = true;
+                }
+            }
+            (self.notify)();
+        }
+    }
+
+    /// Открыть выход заново и продолжить текущий трек из скачанного буфера с места `pos`.
+    fn restore_at(&mut self, pos: f32) -> bool {
+        let Some(buf) = self.current_buf.clone() else { return false };
+        if !self.ensure_audio() {
+            return false;
+        }
+        let Ok(src) = Decoder::new(buf.reader()) else { return false };
+        let src = Eq::new(src.convert_samples::<f32>(), self.eq.clone());
+        let (vol, paused) = (self.volume * self.volume, self.paused);
+        let Some(sink) = self.sink() else { return false };
+        sink.pause();
+        sink.set_volume(vol);
+        sink.append(src);
+        if let Err(e) = sink.try_seek(Duration::from_secs_f32(pos)) {
+            log(format!("seek: {e:?}"));
+        }
+        if !paused {
+            sink.play();
+        }
+        self.held_pos = None;
+        true
     }
 
     fn error(&self, e: impl Into<String>) {
@@ -634,6 +720,7 @@ impl Engine {
             s.clear();
         }
         self.loaded = false;
+        self.held_pos = None;
     }
 
     fn clear_queue(&mut self) {
@@ -690,6 +777,8 @@ impl Engine {
     // ---------- главный цикл ----------
 
     fn tick(&mut self) {
+        #[cfg(windows)]
+        self.check_output();
         if let Some(at) = self.retry_at {
             if Instant::now() >= at {
                 self.retry_at = None;
@@ -863,6 +952,8 @@ impl Engine {
                         if let Err(e) = s.try_seek(Duration::from_secs_f32(sec.max(0.0))) {
                             log(format!("seek: {e:?}"));
                         }
+                    } else if self.held_pos.is_some() {
+                        self.held_pos = Some(sec.max(0.0));
                     }
                 }
             }
@@ -1201,6 +1292,13 @@ impl Engine {
 
     fn resume(&mut self) {
         self.paused = false;
+        if let Some(pos) = self.held_pos.filter(|_| self.loaded && self.audio.is_none()) {
+            if !self.restore_at(pos) {
+                self.paused = true;
+                self.error("Не найдено аудиоустройство");
+                return;
+            }
+        }
         let loaded = self.loaded;
         if let Some(l) = self.listen.as_mut().filter(|_| loaded) {
             l.go();
@@ -1367,6 +1465,7 @@ impl Engine {
         }
         self.current_buf = Some(buf);
         self.loaded = true;
+        self.held_pos = None;
         self.errors_in_row = 0;
         self.sh().loading = false;
         if let Some(l) = self.listen.as_mut().filter(|_| !paused) {
