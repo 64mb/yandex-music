@@ -1,7 +1,7 @@
 //! Аудио-движок: очередь, загрузка и предзагрузка треков, фидбек волне, воспроизведение.
 //! Живёт в своём потоке, UI шлёт ему команды и читает `Shared`.
 
-use crate::api::{Account, Api, Batch, Res, Track, WAVE};
+use crate::api::{Account, Api, Batch, Res, Track, WaveSession, WAVE};
 use crate::config::log;
 use crate::eq::{Eq, EqParams};
 use rodio::{Decoder, OutputStream, Sink, Source as _};
@@ -161,10 +161,14 @@ impl Player {
 /// Сколько живёт сессия волны без прослушивания: оригинал начинает новую через 9 часов.
 const WAVE_SESSION_TTL: u64 = 9 * 3600;
 
+/// `from` «Моей волны» у оригинала, когда её запускают с главной.
+const WAVE_FROM: &str = "desktop-wave_landing_screen-my_wave-radio-default";
+
 struct WaveState {
     uid: String,
     session: String,
-    played: Vec<String>,
+    /// Последний трек волны: с ним сессия клонируется после перезапуска.
+    last: String,
     at: u64,
 }
 
@@ -175,13 +179,74 @@ fn load_wave_state() -> Option<WaveState> {
     Some(WaveState {
         uid: str_at("uid"),
         session: str_at("session"),
-        played: v
-            .get("played")
-            .and_then(|p| p.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-            .unwrap_or_default(),
+        last: str_at("last"),
         at: v.get("at").and_then(|x| x.as_u64()).unwrap_or(0),
     })
+}
+
+/// Где звучит трек — для `/plays`, в тех же полях, что у оригинала.
+#[derive(Clone)]
+struct PlayContext {
+    from: String,
+    context: &'static str,
+    item: Option<String>,
+    playlist: Option<String>,
+    /// Сессия волны; пустая у списков.
+    session: String,
+}
+
+/// Одно прослушивание трека: сколько его реально слушали, была ли пауза и перемотка.
+/// Уходит в `/plays`, когда трек сменился.
+struct Listen {
+    track: Track,
+    ctx: PlayContext,
+    play_id: String,
+    add_time: String,
+    start: String,
+    played: f64,
+    since: Option<Instant>,
+    pause: bool,
+    seek: bool,
+    repeated: bool,
+}
+
+impl Listen {
+    fn played(&self) -> f64 {
+        self.played + self.since.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0)
+    }
+
+    fn stop(&mut self) {
+        if let Some(s) = self.since.take() {
+            self.played += s.elapsed().as_secs_f64();
+        }
+    }
+
+    fn go(&mut self) {
+        self.since.get_or_insert_with(Instant::now);
+    }
+}
+
+/// Случайные 128 бит без отдельной зависимости: sha256 от времени, счётчика и pid.
+fn random_u128() -> u128 {
+    use sha2::{Digest, Sha256};
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let h = Sha256::digest(format!("{t}:{n}:{}", std::process::id()));
+    u128::from_le_bytes(h[..16].try_into().unwrap())
+}
+
+/// uuid v4, как `playId` у оригинала.
+fn uuid4() -> String {
+    let mut b = random_u128().to_be_bytes();
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+}
+
+fn round3(x: f64) -> f64 {
+    (x * 1000.0).round() / 1000.0
 }
 
 fn load_track(api: &Api, t: &Track) -> Res<Vec<u8>> {
@@ -240,14 +305,16 @@ struct Engine {
     radio_started_pending: bool,
     /// Пропуски и дослушанные треки, которые уйдут со следующим запросом треков волны.
     deferred: Vec<serde_json::Value>,
-    /// Сколько пакетов подряд состояло только из уже сыгранных треков.
-    stale_batches: u32,
-    /// Сыгранные треки текущей волны («id:альбом», до 100): уходят серверу как queue, чтобы он не повторялся.
-    played: Vec<String>,
-    /// Станция, к которой относится `played`.
+    /// Станция, для которой уже проверена сохранённая сессия «Моей волны».
     played_station: String,
     /// Сессия «Моей волны» с прошлого запуска уже подхвачена (или не нашлась).
     wave_restored: bool,
+    /// Сессия с прошлого запуска: первый пакет берётся её клоном, как у оригинала.
+    clone_pending: bool,
+    /// Последний трек волны с прошлого запуска — queue для клона.
+    restore_last: Option<String>,
+    /// Текущее прослушивание для `/plays`.
+    listen: Option<Listen>,
     fetching: bool,
     batch_gen: u64,
     retry_at: Option<Instant>,
@@ -295,10 +362,11 @@ impl Engine {
             session: String::new(),
             radio_started_pending: false,
             deferred: Vec::new(),
-            stale_batches: 0,
-            played: Vec::new(),
             played_station: String::new(),
             wave_restored: false,
+            clone_pending: false,
+            restore_last: None,
+            listen: None,
             fetching: false,
             batch_gen: 0,
             retry_at: None,
@@ -365,6 +433,20 @@ impl Engine {
     }
 
     fn feedback(&mut self, kind: &'static str, track: Option<&Track>, played: Option<f64>) {
+        self.send_feedback(kind, track, played, true);
+    }
+
+    /// `from` волны, как у оригинала: «Моя волна» с главной или волна по исполнителю, альбому…
+    fn rotor_from(&self) -> String {
+        match &self.source {
+            Source::Seed { station, .. } => format!("desktop-radio-{}-default", station.replace(':', "-")),
+            _ => WAVE_FROM.to_string(),
+        }
+    }
+
+    /// Фидбек волне. Пропуск, дизлайк и «дослушал» при `defer` ждут следующего запроса треков
+    /// и уходят вместе с ним, как у оригинала; «назад» он отправляет сразу.
+    fn send_feedback(&mut self, kind: &'static str, track: Option<&Track>, played: Option<f64>, defer: bool) {
         let Some(station) = self.source.station().map(String::from) else { return };
         let Some(api) = self.api.clone() else { return };
         if self.session.is_empty() && kind == "radioStarted" {
@@ -381,17 +463,17 @@ impl Engine {
             .map(|t| t.duration_ms as f64 / 1000.0);
         let track = track.map(|t| t.full_id());
         let session = self.session.clone();
+        let from = self.rotor_from();
         if session.is_empty() {
             let _ = self.bg.send(Box::new(move || {
-                if let Err(e) = api.feedback(&station, kind, track.as_deref(), played, &batch) {
+                if let Err(e) = api.feedback(&station, kind, track.as_deref(), played, &batch, &from) {
                     log(format!("feedback {kind}: {e}"));
                 }
             }));
             return;
         }
-        let from = format!("desktop_win-radio-{}-default", station.replace(':', "-"));
         let body = crate::api::session_event(kind, track.as_deref(), played, length, &batch, &from);
-        if matches!(kind, "skip" | "dislike" | "trackFinished") {
+        if defer && matches!(kind, "skip" | "dislike" | "trackFinished") {
             self.deferred.push(body);
             return;
         }
@@ -419,6 +501,129 @@ impl Engine {
         }));
     }
 
+    /// Контекст `/plays` для трека, который сейчас заиграл.
+    fn play_context(&self) -> PlayContext {
+        let radio = |from: String, item: &str| PlayContext {
+            from,
+            context: "radio",
+            item: Some(item.to_string()),
+            playlist: None,
+            session: self.session.clone(),
+        };
+        let list = |from: &str, context: &'static str, item: Option<String>, playlist: Option<String>| PlayContext {
+            from: from.to_string(),
+            context,
+            item,
+            playlist,
+            session: String::new(),
+        };
+        match &self.source {
+            Source::Wave => radio(WAVE_FROM.to_string(), WAVE),
+            Source::Seed { station, .. } => radio(self.rotor_from(), station),
+            Source::List { kind, id, .. } => match kind {
+                ListKind::Album => list("desktop-album-album-default", "album", Some(id.clone()), None),
+                ListKind::Artist => list("desktop-artist-artist-default", "artist", Some(id.clone()), None),
+                ListKind::Playlist => list("desktop-playlist-playlist-default", "playlist", Some(id.clone()), Some(id.clone())),
+                ListKind::Likes => {
+                    let likes = format!("{}:3", self.uid);
+                    list("desktop-playlist-playlist-default", "playlist", Some(likes.clone()), Some(likes))
+                }
+                ListKind::Tracks if id == "search" => list("desktop-search-search-default", "search", None, None),
+                ListKind::Tracks => list("desktop-other-other-default", "other", None, None),
+            },
+        }
+    }
+
+    /// Трек начал звучать: новое прослушивание.
+    fn begin_listen(&mut self, track: &Track, repeated: bool) {
+        let ctx = self.play_context();
+        let radio = ctx.context == "radio";
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        self.listen = Some(Listen {
+            track: track.clone(),
+            ctx,
+            play_id: uuid4(),
+            add_time: format!("{:016}-{}", random_u128() % 10_000_000_000_000_000, ms.div_ceil(1000)),
+            start: crate::api::iso_now(),
+            played: 0.0,
+            since: (!self.paused).then(Instant::now),
+            pause: false,
+            // В волне оригинал всегда шлёт seek: при старте трека плеер ставит его на начало.
+            seek: radio,
+            repeated,
+        });
+    }
+
+    /// Трек сменился: фидбек волне (если нужен) и запись в `/plays`, как у оригинала.
+    /// Второй раз для того же прослушивания ничего не шлёт.
+    fn end_current(&mut self, fb: Option<&'static str>, defer: bool, reason: &'static str) {
+        let Some(mut l) = self.listen.take() else { return };
+        l.stop();
+        let len = l.track.duration_ms as f64 / 1000.0;
+        let near = |x: f64| if (len - x).abs() < 0.5 { len } else { round3(x) };
+        let played = near(l.played());
+        let end = if reason == "finish" { len } else { near(self.pos() as f64) };
+        if let Some(kind) = fb {
+            let t = l.track.clone();
+            self.send_feedback(kind, Some(&t), Some(played), defer);
+        }
+        let (Some(api), false) = (self.api.clone(), self.uid.is_empty()) else { return };
+        let t = &l.track;
+        let mut play = serde_json::json!({
+            "playId": l.play_id,
+            "from": l.ctx.from,
+            "totalPlayedSeconds": played,
+            "endPositionSeconds": end,
+            "trackLengthSeconds": len,
+            "timestamp": crate::api::iso_now(),
+            "context": l.ctx.context,
+            "contextItem": l.ctx.item,
+            "addTracksToPlayerTime": l.add_time,
+            "fromCache": false,
+            "isRestored": false,
+            "audioAuto": "none",
+            "audioOutputName": "Динамик",
+            "audioOutputType": "Speaker",
+            "trackId": t.id,
+            "seek": l.seek,
+            "pause": l.pause,
+            "startTimestamp": l.start,
+            "maxPlayerStage": "play",
+            "isRepeated": l.repeated,
+            "changeReason": reason,
+            "isLivePlayableIndex": l.ctx.context == "radio",
+        });
+        if let Some(a) = &t.album_id {
+            play["albumId"] = a.clone().into();
+        }
+        if let Some(p) = &l.ctx.playlist {
+            play["playlistId"] = p.clone().into();
+        }
+        if l.ctx.context == "radio" {
+            let batch = if t.batch_id.is_empty() { self.batch_id.clone() } else { t.batch_id.clone() };
+            play["radioSessionId"] = l.ctx.session.clone().into();
+            play["batchId"] = batch.into();
+            play["isFromAutoflow"] = false.into();
+            play["isFromPumpkin"] = false.into();
+        }
+        let uid = self.uid.clone();
+        let _ = self.bg.send(Box::new(move || {
+            if let Err(e) = api.plays(&uid, &play) {
+                log(format!("plays: {e}"));
+            }
+        }));
+    }
+
+    /// queue для следующего пакета, как у оригинала: трек, на котором сменился трек, и тот,
+    /// что заиграл после него. Всю историю оригинал туда не кладёт.
+    fn rotor_queue(&self) -> Vec<String> {
+        let mut q: Vec<String> = self.history.last().filter(|t| !t.batch_id.is_empty()).map(|t| t.full_id()).into_iter().collect();
+        if let Some(c) = &self.current {
+            q.push(c.full_id());
+        }
+        q
+    }
+
     fn stop_audio(&mut self) {
         if let Some(s) = self.sink() {
             s.clear();
@@ -428,7 +633,6 @@ impl Engine {
 
     fn clear_queue(&mut self) {
         self.flush_feedback();
-        self.stale_batches = 0;
         self.queue.clear();
         self.prefetch = None;
         self.prefetching = None;
@@ -444,9 +648,11 @@ impl Engine {
         self.gen += 1;
         self.clear_queue();
         self.history.clear();
-        self.played.clear();
+        self.listen = None;
         self.played_station.clear();
         self.wave_restored = false;
+        self.clone_pending = false;
+        self.restore_last = None;
         self.current = None;
         self.current_bytes = None;
         self.list = None;
@@ -486,8 +692,17 @@ impl Engine {
             }
         }
         if self.loaded && !self.paused && self.sink().map(|s| s.empty()).unwrap_or(false) {
-            if self.repeat == Repeat::One && self.replay() {
-                return;
+            if self.repeat == Repeat::One && self.current_bytes.is_some() {
+                if let Some(l) = &mut self.listen {
+                    l.repeated = true;
+                }
+                self.end_current(None, true, "finish");
+                if self.replay() {
+                    if let Some(t) = self.current.clone() {
+                        self.begin_listen(&t, false);
+                    }
+                    return;
+                }
             }
             self.advance(End::Finished);
             self.sync();
@@ -621,6 +836,10 @@ impl Engine {
             Cmd::PlayPause if self.paused => self.resume(),
             Cmd::PlayPause => {
                 self.paused = true;
+                if let Some(l) = &mut self.listen {
+                    l.stop();
+                    l.pause = true;
+                }
                 if let Some(sink) = self.sink() { sink.pause(); }
             }
             Cmd::Next => {
@@ -631,6 +850,9 @@ impl Engine {
             }
             Cmd::Prev => self.prev(),
             Cmd::Seek(sec) => {
+                if let Some(l) = &mut self.listen {
+                    l.seek = true;
+                }
                 if self.loaded {
                     if let Some(s) = self.sink() {
                         if let Err(e) = s.try_seek(Duration::from_secs_f32(sec.max(0.0))) {
@@ -664,9 +886,7 @@ impl Engine {
                 if tracks.is_empty() {
                     return;
                 }
-                if let (Some(cur), true) = (self.current.clone(), self.loaded) {
-                    self.feedback("skip", Some(&cur), Some(self.pos() as f64));
-                }
+                self.end_current(Some("skip"), true, "other_track");
                 self.clear_queue();
                 let start = start.min(tracks.len() - 1);
                 let mut order: Vec<Track> = tracks.clone();
@@ -686,10 +906,8 @@ impl Engine {
                     return;
                 }
                 let skipped: Vec<Track> = self.queue.drain(..i).collect();
+                self.end_current(Some("skip"), true, "other_track");
                 if let Some(cur) = self.current.take() {
-                    if self.loaded {
-                        self.feedback("skip", Some(&cur), Some(self.pos() as f64));
-                    }
                     self.history.push(cur);
                 }
                 self.history.extend(skipped);
@@ -767,6 +985,8 @@ impl Engine {
     // ---------- очередь ----------
 
     fn start_wave(&mut self, src: Source, fetch: bool) {
+        // Пропуск уходит ещё в старую волну: clear_queue отправит его туда.
+        self.end_current(Some("skip"), true, "other_track");
         self.clear_queue();
         self.list = None;
         self.set_source(src);
@@ -790,33 +1010,31 @@ impl Engine {
         self.retry_at = None;
         if self.played_station != station {
             self.played_station = station.clone();
-            self.played.clear();
             if station == WAVE {
                 self.restore_wave();
             }
         }
-        // queue, как у оригинала: всё, что уже звучало в этой волне, и текущий трек.
-        // Ещё не сыгранные треки сюда не попадают.
-        let mut queue = self.played.clone();
-        if let Some(c) = &self.current {
-            let id = c.full_id();
-            if queue.last() != Some(&id) {
-                queue.push(id);
-            }
-        }
-        let session = self.session.clone();
+        let (session, queue) = if self.session.is_empty() {
+            (WaveSession::New, if replace { Vec::new() } else { self.rotor_queue() })
+        } else if self.clone_pending {
+            (WaveSession::Clone(self.session.clone()), self.restore_last.clone().into_iter().collect())
+        } else {
+            (WaveSession::Next(self.session.clone()), self.rotor_queue())
+        };
         let feedbacks = std::mem::take(&mut self.deferred);
         let tx = self.tx.clone();
         let gen = self.batch_gen;
         // В очереди фонового потока: запрос уйдёт после уже отправленных фидбеков.
         let _ = self.bg.send(Box::new(move || {
-            let res = api.wave_session(&station, Some(&session), &queue, &feedbacks);
+            let res = api.wave_session(&station, session, &queue, &feedbacks);
             let _ = tx.send(Msg::Batch { res, replace, gen });
         }));
     }
 
     fn on_batch(&mut self, b: Batch, replace: bool) {
         self.batch_id = b.batch_id;
+        self.clone_pending = false;
+        self.restore_last = None;
         if !b.session.is_empty() {
             // Сессия могла подхватиться с прошлого запуска — radioStarted нужен и ей.
             let changed = b.session != self.session;
@@ -833,33 +1051,13 @@ impl Engine {
             self.queue.clear();
             self.prefetch = None;
         }
+        // Пакет берётся как есть, как у оригинала: сервер сам решает, что повторить.
+        // Убираем только то, что уже стоит в очереди или играет, и 18+, если их выключили.
         let queued = |t: &Track| {
             self.queue.iter().any(|q| q.id == t.id) || (!replace && self.current.as_ref().is_some_and(|c| c.id == t.id))
         };
-        // Сервер иногда возвращает недавно сыгранные треки — их пропускаем. Если весь пакет
-        // из повторов, просим ещё (до двух раз подряд), а потом берём как есть, чтобы не замолчать.
-        let check_history = !replace || self.source == Source::Wave;
-        let played = |t: &Track| {
-            self.history.iter().any(|h| h.id == t.id) || self.played.iter().any(|p| p.split(':').next() == Some(t.id.as_str()))
-        };
         let no_explicit = !crate::api::allow_explicit();
-        let skip = |t: &Track| queued(t) || (check_history && played(t)) || (no_explicit && t.explicit);
-        let fresh: Vec<Track> = b
-            .tracks
-            .iter()
-            .filter(|t| !skip(t))
-            .cloned()
-            .collect();
-        let tracks = if !fresh.is_empty() || b.tracks.iter().all(&queued) {
-            fresh
-        } else if self.stale_batches < 2 {
-            self.stale_batches += 1;
-            self.fetch_batch_with(replace);
-            return;
-        } else {
-            b.tracks.iter().filter(|t| !queued(t)).cloned().collect()
-        };
-        self.stale_batches = 0;
+        let tracks: Vec<Track> = b.tracks.iter().filter(|t| !queued(t) && !(no_explicit && t.explicit)).cloned().collect();
         self.queue.extend(tracks);
         if replace {
             self.advance(End::Restart);
@@ -877,17 +1075,17 @@ impl Engine {
         }
     }
 
+    /// Смена трека. Фидбек «дослушал» и «пропуск» ждёт следующего запроса треков и уходит
+    /// вместе с ним, как у оригинала.
     fn advance(&mut self, end: End) {
+        let (kind, reason) = match end {
+            End::Finished => ("trackFinished", "finish"),
+            End::Skip => ("skip", "skip"),
+            End::Dislike => ("dislike", "dislike"),
+            End::Restart => ("skip", "other_track"),
+        };
+        self.end_current(Some(kind), true, reason);
         if let Some(cur) = self.current.take() {
-            if self.loaded {
-                let played = self.pos() as f64;
-                let kind = match end {
-                    End::Finished => "trackFinished",
-                    End::Skip | End::Restart => "skip",
-                    End::Dislike => "dislike",
-                };
-                self.feedback(kind, Some(&cur), Some(played));
-            }
             self.history.push(cur);
             self.trim_history();
         }
@@ -896,19 +1094,16 @@ impl Engine {
         if matches!(end, End::Skip | End::Dislike) {
             self.refresh_wave();
         }
-        self.flush_feedback();
     }
 
-    /// Пропуск в волне, как у оригинала: ещё не сыгранные треки волны убираем и сразу просим
-    /// новые, а пропуск уходит в том же запросе. Так волна подстраивается сразу, а не через пакет.
-    /// Треки, добавленные вручную, и уже сыгранные (после «назад») остаются.
+    /// Пропуск в волне, как у оригинала: заиграл следующий трек, остальные несыгранные треки
+    /// волны убираются и сразу просятся новые, а пропуск уходит в том же запросе. Так волна
+    /// подстраивается сразу, а не через пакет. Треки, добавленные вручную, остаются.
     fn refresh_wave(&mut self) {
         if self.list.is_some() || self.source.station().is_none() || self.session.is_empty() {
             return;
         }
-        let played = &self.played;
-        self.queue
-            .retain(|t| t.batch_id.is_empty() || played.iter().any(|p| p.split(':').next() == Some(t.id.as_str())));
+        self.queue.retain(|t| t.batch_id.is_empty());
         if let Some((id, _)) = &self.prefetch {
             if !self.queue.iter().any(|t| t.id == *id) {
                 self.prefetch = None;
@@ -959,10 +1154,8 @@ impl Engine {
         }
         self.prefetch = None;
         if skip_current {
+            self.end_current(Some("skip"), true, "skip");
             if let Some(cur) = self.current.take() {
-                if self.loaded {
-                    self.feedback("skip", Some(&cur), Some(self.pos() as f64));
-                }
                 self.history.push(cur);
                 self.trim_history();
             }
@@ -998,6 +1191,9 @@ impl Engine {
 
     fn resume(&mut self) {
         self.paused = false;
+        if let Some(l) = &mut self.listen {
+            l.go();
+        }
         if self.current.is_none() {
             if self.list.is_some() {
                 self.play_from_queue();
@@ -1044,7 +1240,8 @@ impl Engine {
                 s.loading = self.list.is_none() && self.source.station().is_some();
             }
         }
-        if self.queue.len() < 2 {
+        // Как у оригинала: новый пакет волны нужен, когда заиграл последний трек очереди.
+        if self.queue.is_empty() {
             self.fetch_batch();
         }
     }
@@ -1060,10 +1257,8 @@ impl Engine {
             self.history.retain(|t| !t.explicit);
         }
         if let Some(p) = self.history.pop() {
+            self.end_current(Some("skip"), false, "back_skip");
             if let Some(c) = self.current.take() {
-                if self.loaded {
-                    self.feedback("skip", Some(&c), Some(self.pos() as f64));
-                }
                 self.queue.push_front(c);
             }
             self.stop_audio();
@@ -1081,6 +1276,7 @@ impl Engine {
     fn start_current(&mut self) {
         self.gen += 1;
         self.loaded = false;
+        self.listen = None;
         self.current_bytes = None;
         let Some(t) = self.current.clone() else { return };
         {
@@ -1166,52 +1362,50 @@ impl Engine {
         self.loaded = true;
         self.errors_in_row = 0;
         self.sh().loading = false;
+        self.begin_listen(&t, false);
         self.feedback("trackStarted", Some(&t), None);
-        self.remember_played(&t);
+        self.remember_wave(&t);
         self.prefetch_next();
     }
 
     // ---------- память волны ----------
 
-    fn remember_played(&mut self, t: &Track) {
-        let Some(station) = self.source.station() else { return };
-        if station != self.played_station {
-            return;
+    fn remember_wave(&mut self, t: &Track) {
+        if self.source.station() == Some(self.played_station.as_str()) && !t.batch_id.is_empty() {
+            self.save_wave_with(Some(t.full_id()));
         }
-        let id = t.full_id();
-        self.played.retain(|p| *p != id);
-        self.played.push(id);
-        if self.played.len() > 100 {
-            let n = self.played.len() - 100;
-            self.played.drain(..n);
-        }
-        self.save_wave();
     }
 
-    /// «Моя волна» после перезапуска продолжается с той же сессии и тем же списком сыгранного.
-    /// Иначе сервер начинает с чистого листа и выдаёт почти то же, что в прошлый раз.
+    /// «Моя волна» после перезапуска продолжается, как у оригинала: сервер клонирует прошлую
+    /// сессию вместе с её историей. Иначе волна начинает с чистого листа.
     fn restore_wave(&mut self) {
         let first = !std::mem::replace(&mut self.wave_restored, true);
         let Some(w) = load_wave_state() else { return };
         if w.uid != self.uid {
             return;
         }
-        self.played = w.played;
         // Сессию берём только при запуске; если сервер её уже закрыл, wave_session начнёт новую.
         let fresh = crate::config::now_secs().saturating_sub(w.at) < WAVE_SESSION_TTL;
-        if first && fresh && self.session.is_empty() {
+        if first && fresh && self.session.is_empty() && !w.session.is_empty() {
             self.session = w.session;
+            self.clone_pending = true;
+            self.restore_last = Some(w.last).filter(|l| !l.is_empty());
         }
     }
 
     fn save_wave(&self) {
+        let last = self.current.as_ref().filter(|t| !t.batch_id.is_empty()).map(|t| t.full_id());
+        self.save_wave_with(last);
+    }
+
+    fn save_wave_with(&self, last: Option<String>) {
         if self.played_station != WAVE || self.source.station() != Some(WAVE) || self.uid.is_empty() {
             return;
         }
         let w = serde_json::json!({
             "uid": self.uid,
             "session": self.session,
-            "played": self.played,
+            "last": last.unwrap_or_default(),
             "at": crate::config::now_secs(),
         });
         let _ = self.bg.send(Box::new(move || {
