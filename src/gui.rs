@@ -2180,7 +2180,7 @@ impl Ctx {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = w.upgrade() {
                         let app = ui.global::<App>();
-                        let chars: Vec<SharedString> = code.chars().map(|c| SharedString::from(c.to_uppercase().to_string())).collect();
+                        let chars: Vec<SharedString> = code.chars().map(|c| SharedString::from(c.to_string())).collect();
                         app.set_login_code_chars(ModelRc::from(Rc::new(VecModel::from(chars))));
                         app.set_login_code(code.into());
                         app.set_login_error(err.into());
