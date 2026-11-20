@@ -47,6 +47,12 @@ pub struct Config {
     pub check_updates: bool,
     /// «Треки 18+» в меню профиля.
     pub allow_explicit: bool,
+    /// Обычное окно при выходе, в пикселях экрана. На Wayland места окна не узнать.
+    pub window_pos: Option<[i32; 2]>,
+    pub window_size: Option<[u32; 2]>,
+    pub window_maximized: bool,
+    /// Место мини-плеера при выходе.
+    pub mini_pos: Option<[i32; 2]>,
 }
 
 /// Блок запоминается по id из скелета: он постоянный («recommended_playlists»), а заголовок
@@ -82,6 +88,10 @@ impl Default for Config {
             hidden_blocks: Vec::new(),
             check_updates: true,
             allow_explicit: true,
+            window_pos: None,
+            window_size: None,
+            window_maximized: false,
+            mini_pos: None,
         }
     }
 }
