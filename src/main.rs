@@ -20,6 +20,7 @@ mod net;
 mod palette;
 mod player;
 mod secret;
+mod stream;
 #[cfg_attr(windows, path = "sys/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "sys/linux.rs")]
 mod sys;

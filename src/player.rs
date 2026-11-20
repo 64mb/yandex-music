@@ -4,9 +4,9 @@
 use crate::api::{Account, Api, Batch, Res, Track, WaveSession, WAVE};
 use crate::config::log;
 use crate::eq::{Eq, EqParams};
+use crate::stream::{Buf, Reader};
 use rodio::{Decoder, OutputStream, Sink, Source as _};
 use std::collections::{HashSet, VecDeque};
-use std::io::Cursor;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -113,8 +113,8 @@ enum Msg {
     Account(Res<Account>),
     Likes(Res<Vec<String>>),
     Batch { res: Res<Batch>, replace: bool, gen: u64 },
-    Audio { gen: u64, res: Res<Vec<u8>> },
-    Prefetch { id: String, res: Res<Vec<u8>> },
+    Audio { gen: u64, res: Res<Audio> },
+    Prefetch { id: String, res: Res<Audio> },
     Error(String),
 }
 
@@ -249,9 +249,14 @@ fn round3(x: f64) -> f64 {
     (x * 1000.0).round() / 1000.0
 }
 
-fn load_track(api: &Api, t: &Track) -> Res<Vec<u8>> {
+/// Трек, который качается, и декодер, уже прочитавший его начало.
+type Audio = (Arc<Buf>, Decoder<Reader>);
+
+fn load_track(api: &Api, t: &Track) -> Res<Audio> {
     let url = api.stream_url(&t.id)?;
-    api.fetch_bytes(&url)
+    let buf = Buf::download(api.open(&url)?);
+    let dec = Decoder::new(buf.reader()).map_err(|e| format!("не удалось декодировать: {e}"))?;
+    Ok((buf, dec))
 }
 
 /// Перемешивание без лишних зависимостей (xorshift от времени).
@@ -298,7 +303,7 @@ struct Engine {
     queue: VecDeque<Track>,
     history: Vec<Track>,
     current: Option<Track>,
-    current_bytes: Option<Arc<[u8]>>,
+    current_buf: Option<Arc<Buf>>,
     batch_id: String,
     /// Сессия ротора текущей волны; radioStarted уходит в неё, когда она появится.
     session: String,
@@ -324,7 +329,7 @@ struct Engine {
     volume: f32,
     repeat: Repeat,
     shuffle: bool,
-    prefetch: Option<(String, Vec<u8>)>,
+    prefetch: Option<(String, Audio)>,
     prefetching: Option<String>,
     errors_in_row: u32,
     was_playing: bool,
@@ -357,7 +362,7 @@ impl Engine {
             queue: VecDeque::new(),
             history: Vec::new(),
             current: None,
-            current_bytes: None,
+            current_buf: None,
             batch_id: String::new(),
             session: String::new(),
             radio_started_pending: false,
@@ -654,7 +659,7 @@ impl Engine {
         self.clone_pending = false;
         self.restore_last = None;
         self.current = None;
-        self.current_bytes = None;
+        self.current_buf = None;
         self.list = None;
         self.source = Source::Wave;
         let mut s = self.sh();
@@ -692,7 +697,7 @@ impl Engine {
             }
         }
         if self.loaded && !self.paused && self.sink().map(|s| s.empty()).unwrap_or(false) {
-            if self.repeat == Repeat::One && self.current_bytes.is_some() {
+            if self.repeat == Repeat::One && self.current_buf.is_some() {
                 if let Some(l) = &mut self.listen {
                     l.repeated = true;
                 }
@@ -721,8 +726,8 @@ impl Engine {
     }
 
     fn replay(&mut self) -> bool {
-        let Some(bytes) = self.current_bytes.clone() else { return false };
-        let Ok(src) = Decoder::new(Cursor::new(bytes)) else { return false };
+        let Some(buf) = self.current_buf.clone() else { return false };
+        let Ok(src) = Decoder::new(buf.reader()) else { return false };
         let src = Eq::new(src.convert_samples::<f32>(), self.eq.clone());
         if let Some(sink) = self.sink() {
             sink.append(src);
@@ -1233,7 +1238,7 @@ impl Engine {
             }
             None => {
                 self.current = None;
-                self.current_bytes = None;
+                self.current_buf = None;
                 if self.list.is_some() { self.paused = true; }
                 self.gen += 1;
                 let mut s = self.sh();
@@ -1278,7 +1283,7 @@ impl Engine {
         self.gen += 1;
         self.loaded = false;
         self.listen = None;
-        self.current_bytes = None;
+        self.current_buf = None;
         let Some(t) = self.current.clone() else { return };
         // Как у оригинала, трек начат сразу, а не когда докачался: иначе пропуск до загрузки
         // не доходит до волны, и она отдаёт этот трек снова.
@@ -1335,21 +1340,13 @@ impl Engine {
         });
     }
 
-    fn play_loaded(&mut self, bytes: Vec<u8>) {
+    fn play_loaded(&mut self, (buf, src): Audio) {
         let Some(t) = self.current.clone() else { return };
         if !self.ensure_audio() {
             self.error("Не найдено аудиоустройство");
             self.sh().loading = false;
             return;
         }
-        let bytes: Arc<[u8]> = bytes.into();
-        let src = match Decoder::new(Cursor::new(bytes.clone())) {
-            Ok(s) => s,
-            Err(e) => {
-                self.on_load_error(format!("не удалось декодировать: {e}"));
-                return;
-            }
-        };
         let src = Eq::new(src.convert_samples::<f32>(), self.eq.clone());
         let vol = self.volume * self.volume;
         let paused = self.paused;
@@ -1363,7 +1360,7 @@ impl Engine {
                 sink.play()
             }
         }
-        self.current_bytes = Some(bytes);
+        self.current_buf = Some(buf);
         self.loaded = true;
         self.errors_in_row = 0;
         self.sh().loading = false;
@@ -1440,6 +1437,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     /// Сетевой тест: ссылка на поток → скачивание → декодирование (без токена — 30-сек превью).
     #[test]
