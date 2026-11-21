@@ -41,6 +41,8 @@ pub struct Config {
     pub mode: String,
     /// Куда скачивать треки. Пусто — Музыка\Яндекс Музыка.
     pub download_dir: String,
+    /// Скачивать FLAC, если он есть у трека.
+    pub download_flac: bool,
     /// Блоки главной и «Книг и подкастов», которые скрыл пользователь.
     pub hidden_blocks: Vec<HiddenBlock>,
     /// Раз в полчаса спрашивать GitHub о новой версии.
@@ -85,6 +87,7 @@ impl Default for Config {
             navbar_collapsed: false,
             mode: "smooth".into(),
             download_dir: String::new(),
+            download_flac: false,
             hidden_blocks: Vec::new(),
             check_updates: true,
             allow_explicit: true,

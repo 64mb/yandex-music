@@ -1571,6 +1571,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.set_linux(cfg!(target_os = "linux"));
     app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
+    app.set_download_flac(cfg.download_flac);
     app.set_hidden_blocks(landing_ui::hidden_titles(&cfg).into());
     let places = Rc::new(Places::default());
     places.mini.set(cfg.mini_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y)));
@@ -2808,6 +2809,13 @@ impl Ctx {
                 st.cfg.download_dir = dir;
                 st.cfg.save();
             }
+            "download-flac" => {
+                let on = !app.get_download_flac();
+                app.set_download_flac(on);
+                let mut st = self.st.borrow_mut();
+                st.cfg.download_flac = on;
+                st.cfg.save();
+            }
             "hidden-blocks" => {
                 {
                     let mut st = self.st.borrow_mut();
@@ -3198,9 +3206,10 @@ impl Ctx {
                 let Some(net) = net else { return };
                 let api = net.api.clone();
                 let dir = music_dir(&self.st.borrow().cfg);
+                let flac = self.st.borrow().cfg.download_flac;
                 self.toast(format!("Скачиваем «{}»", t.title));
                 std::thread::spawn(move || {
-                    let res = save_track(&api, &dir, &t);
+                    let res = save_track(&api, &dir, &t, flac);
                     net.say(match res {
                         Ok(p) => format!("Сохранено: {}", p.display()),
                         Err(e) => format!("Не удалось скачать: {e}"),
@@ -3770,6 +3779,7 @@ impl Ctx {
         self.toast(format!("Скачиваем {}", tracks_word(tracks.len() as u64)));
         let api = net.api.clone();
         let dir = music_dir(&self.st.borrow().cfg).join(file_name(&folder));
+        let flac = self.st.borrow().cfg.download_flac;
         std::thread::spawn(move || {
             let total = tracks.len();
             let (mut ok, mut failed) = (0, 0);
@@ -3778,7 +3788,7 @@ impl Ctx {
                     ok += 1;
                     continue;
                 }
-                match save_track(&api, &dir, t) {
+                match save_track(&api, &dir, t, flac) {
                     Ok(_) => ok += 1,
                     Err(e) => {
                         failed += 1;
@@ -3829,9 +3839,9 @@ fn saved_already(dir: &std::path::Path, t: &Track) -> bool {
         .any(|e| std::fs::metadata(dir.join(format!("{stem}.{e}"))).is_ok_and(|m| m.len() > 0))
 }
 
-/// Скачать трек: сначала в `.part`, теги — в mp3, и только после этого переименовать в
+/// Скачать трек: сначала в `.part`, теги — в mp3 и FLAC, и только после этого переименовать в
 /// готовое имя. Обрыв оставит лишь `.part`, который следующая попытка перезапишет.
-fn save_track(api: &Api, dir: &std::path::Path, t: &Track) -> Result<std::path::PathBuf, String> {
+fn save_track(api: &Api, dir: &std::path::Path, t: &Track, flac: bool) -> Result<std::path::PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let stem = track_file_stem(t);
     let part = dir.join(format!("{stem}.part"));
@@ -3840,7 +3850,17 @@ fn save_track(api: &Api, dir: &std::path::Path, t: &Track) -> Result<std::path::
         if attempt > 0 {
             std::thread::sleep(Duration::from_secs(2 * attempt));
         }
-        match api.stream_url(&t.id).and_then(|u| api.download_to(&u, &part)) {
+        let url = || {
+            if flac {
+                match api.flac_url(&t.id) {
+                    Ok(Some(u)) => return Ok(u),
+                    Ok(None) => {}
+                    Err(e) => log(format!("flac {}: {e}", t.id)),
+                }
+            }
+            api.stream_url(&t.id)
+        };
+        match url().and_then(|u| api.download_to(&u, &part)) {
             Ok(n) if n > 0 => {
                 last.clear();
                 break;
@@ -3865,16 +3885,28 @@ fn save_track(api: &Api, dir: &std::path::Path, t: &Track) -> Result<std::path::
         }
         let ext = audio_ext(&head);
         let path = dir.join(format!("{stem}.{ext}"));
+        let remux = flac && ext == "m4a";
+        let title = if t.version.is_empty() { t.title.clone() } else { format!("{} ({})", t.title, t.version) };
+        let cover = if ext == "mp3" || remux { t.cover_url(400).and_then(|u| api.fetch_bytes(&u).ok()) } else { None };
+        let tags = crate::tags::Tags { title: &title, artist: &t.artists, album: &t.album_title, year: t.year, track: t.position, cover: cover.as_deref() };
+        if remux {
+            let path = dir.join(format!("{stem}.flac"));
+            let tmp = dir.join(format!("{stem}.flac.part"));
+            match crate::flac::from_mp4(&part, &tmp, crate::tags::flac_blocks(&tags)) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&part);
+                    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+                    return Ok(path);
+                }
+                // Не разобрали MP4 — сохраним как .m4a, FLAC в нём тоже играется.
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp);
+                    log(format!("flac {}: {e}", t.id));
+                }
+            }
+        }
         if ext == "mp3" {
-            let cover = t.cover_url(400).and_then(|u| api.fetch_bytes(&u).ok());
-            let tag = crate::tags::id3(&crate::tags::Tags {
-                title: &if t.version.is_empty() { t.title.clone() } else { format!("{} ({})", t.title, t.version) },
-                artist: &t.artists,
-                album: &t.album_title,
-                year: t.year,
-                track: t.position,
-                cover: cover.as_deref(),
-            });
+            let tag = crate::tags::id3(&tags);
             let tagged = dir.join(format!("{stem}.tagged.part"));
             {
                 use std::io::{Read as _, Seek as _, Write as _};

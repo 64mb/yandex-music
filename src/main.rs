@@ -10,6 +10,7 @@ mod client;
 mod config;
 mod discord;
 mod eq;
+mod flac;
 mod gui;
 mod history;
 mod i18n;
