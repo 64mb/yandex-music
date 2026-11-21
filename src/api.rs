@@ -967,7 +967,15 @@ impl Api {
 
     /// Блоки лендингов отвечают так же, как официальному приложению для Windows.
     pub fn get_raw(&self, path: &str) -> Res<Value> {
-        let (status, text) = self.send_text(self.desktop_req(Method::GET, path))?;
+        self.send_raw(self.desktop_req(Method::GET, path))
+    }
+
+    pub fn post_raw(&self, path: &str, body: &Value) -> Res<Value> {
+        self.send_raw(self.desktop_req(Method::POST, path).json(body))
+    }
+
+    fn send_raw(&self, rb: RequestBuilder) -> Res<Value> {
+        let (status, text) = self.send_text(rb)?;
         if !status.is_success() {
             return Err(format!("HTTP {status}: {}", short(&text)));
         }
@@ -1218,12 +1226,7 @@ impl Api {
         if LESS_AI.load(std::sync::atomic::Ordering::Relaxed) {
             rb = rb.header("X-Yandex-Music-AI-Content-Rate", "reduced");
         }
-        let (status, text) = self.send_text(rb)?;
-        if !status.is_success() {
-            return Err(format!("HTTP {status}: {}", short(&text)));
-        }
-        let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        Ok(v.get("result").cloned().unwrap_or(v))
+        self.send_raw(rb)
     }
 
     /// Треки волны через сессию ротора, как у оригинала.

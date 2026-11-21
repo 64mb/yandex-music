@@ -11,6 +11,7 @@ mod config;
 mod discord;
 mod eq;
 mod gui;
+mod history;
 mod i18n;
 mod images;
 mod landing;

@@ -2,6 +2,7 @@
 
 slint::include_modules!();
 
+mod history_ui;
 mod landing_ui;
 
 use crate::api::{album_kind_word, Album, Api, Card, Collection, Pin, Playlist, Track};
@@ -475,6 +476,7 @@ impl Ctx {
             Page::Artists => self.refresh_my_artists(),
             Page::Trends | Page::Concerts | Page::Nonmusic => self.refresh_landing(),
             Page::Chart => self.refresh_chart(),
+            Page::History => self.enter_history(),
             Page::Grid => {
                 if let Some(k) = key {
                     self.st.borrow_mut().grid_key = Some(k);
@@ -611,6 +613,7 @@ impl Ctx {
             Page::Artists => self.show_my_top(),
             Page::Trends | Page::Concerts | Page::Nonmusic => self.refresh_landing(),
             Page::Chart => self.refresh_chart(),
+            Page::History => self.refresh_history(),
             _ => {}
         }
         if self.ui().global::<App>().get_menu_open() {
@@ -1804,6 +1807,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
 
     register_extra(&app);
     landing_ui::register(&app);
+    history_ui::register(&app);
     landing_ui::load_concert_assets(&app);
 
     let weak = ui.as_weak();
@@ -3606,6 +3610,10 @@ impl Ctx {
                 drop(st);
                 self.release_chart();
             }
+            Page::History => {
+                drop(st);
+                self.release_history();
+            }
             Page::Artists => {
                 drop(st);
                 app.set_top_artists(ModelRc::default());
@@ -3650,6 +3658,7 @@ impl Ctx {
             "ar-popular" => self.st.borrow().artist_tracks.get(i).cloned(),
             "chart" => self.st.borrow().chart.get(i).cloned(),
             "results" => self.st.borrow().results.get(i).cloned(),
+            "history" => self.history_track(i),
             "likes-preview" => {
                 let data = self.collection()?;
                 let Data::Collection(c) = &*data else { return None };
