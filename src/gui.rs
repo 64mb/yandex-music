@@ -1940,6 +1940,14 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         });
         install_mpris(&ui, &player);
     }
+    // Alt+F4 и закрытие из панели задач: Slint сам только прячет окно, а процесс остаётся жить.
+    let weak = ui.as_weak();
+    ui.window().on_close_requested(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<App>().invoke_close();
+        }
+        slint::CloseRequestResponse::KeepWindowShown
+    });
 
     ui.window().on_winit_window_event(|_w, ev| {
         use slint::winit_030::EventResult;
