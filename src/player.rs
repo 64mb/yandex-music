@@ -1,6 +1,7 @@
 //! Аудио-движок: очередь, загрузка и предзагрузка треков, фидбек волне, воспроизведение.
 //! Живёт в своём потоке, UI шлёт ему команды и читает `Shared`.
 
+use crate::ahead::Ahead;
 use crate::api::{Account, Api, Batch, Res, Track, WaveSession, WAVE};
 use crate::config::log;
 use crate::eq::{Eq, EqParams};
@@ -572,7 +573,7 @@ impl Engine {
             return false;
         }
         let Ok(src) = Decoder::new(buf.reader()) else { return false };
-        let src = Eq::new(src.convert_samples::<f32>(), self.eq.clone());
+        let src = Ahead::new(Eq::new(src.convert_samples::<f32>(), self.eq.clone()));
         let (vol, paused) = (self.volume * self.volume, self.paused);
         let Some(sink) = self.sink() else { return false };
         sink.pause();
@@ -890,7 +891,7 @@ impl Engine {
     fn replay(&mut self) -> bool {
         let Some(buf) = self.current_buf.clone() else { return false };
         let Ok(src) = Decoder::new(buf.reader()) else { return false };
-        let src = Eq::new(src.convert_samples::<f32>(), self.eq.clone());
+        let src = Ahead::new(Eq::new(src.convert_samples::<f32>(), self.eq.clone()));
         if let Some(sink) = self.sink() {
             sink.append(src);
             sink.play();
@@ -1523,7 +1524,7 @@ impl Engine {
             self.sh().loading = false;
             return;
         }
-        let src = Eq::new(src.convert_samples::<f32>(), self.eq.clone());
+        let src = Ahead::new(Eq::new(src.convert_samples::<f32>(), self.eq.clone()));
         let vol = self.volume * self.volume;
         let paused = self.paused;
         if let Some(sink) = self.sink() {
