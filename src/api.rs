@@ -1467,6 +1467,20 @@ impl Api {
         })
     }
 
+    /// «Знакомое вам» у исполнителя: сначала треки из коллекции, потом слышанные в Моей волне.
+    pub fn artist_familiar(&self, id: &str) -> Res<Vec<Track>> {
+        let v = self.get_raw(&format!("/artists/{id}/familiar-you?waveTracksLimit=100&collectionTracksLimit=100&collectionAlbumsLimit=20"))?;
+        let mut seen = std::collections::HashSet::new();
+        let tracks = ["/collection/tracks", "/wave/tracks"]
+            .iter()
+            .filter_map(|p| v.pointer(p).and_then(|t| t.as_array()))
+            .flatten()
+            .filter_map(|x| parse_track(x.get("track").unwrap_or(x)))
+            .filter(|t| seen.insert(t.id.clone()))
+            .collect();
+        Ok(tracks)
+    }
+
     pub fn artist_tracks(&self, id: &str) -> Res<Vec<Track>> {
         let mut out = Vec::new();
         for page in 0..10 {

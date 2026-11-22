@@ -2907,7 +2907,11 @@ impl Ctx {
         let st = self.st.borrow();
         match st.list_key.as_deref()? {
             "likes" => Some(format!("playlist:{}:3", st.uid)),
-            k => Some(k.strip_prefix("artist-tracks:").map_or_else(|| k.to_string(), |id| format!("artist:{id}"))),
+            k => Some(
+                k.strip_prefix("artist-tracks:")
+                    .or_else(|| k.strip_prefix("familiar:"))
+                    .map_or_else(|| k.to_string(), |id| format!("artist:{id}")),
+            ),
         }
     }
 
@@ -4058,9 +4062,9 @@ fn register_extra(app: &App) {
     });
     app.on_artist_familiar(|| {
         with_ctx(|c| {
-            let Some((id, name)) = c.current_artist() else { return };
-            c.player.send(Cmd::Wave(Source::Seed { station: format!("artist:{id}"), header: "Моя волна по исполнителю".into(), title: name }));
-            c.start();
+            if let Some((id, _)) = c.current_artist() {
+                c.navigate(Page::List, Some(format!("familiar:{id}")), true);
+            }
         })
     });
 
