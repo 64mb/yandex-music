@@ -19,6 +19,9 @@ mod config;
 #[path = "../../src/eq.rs"]
 #[allow(dead_code)]
 mod eq;
+#[path = "../../src/flac.rs"]
+#[allow(dead_code)]
+mod flac;
 #[path = "../../src/history.rs"]
 #[allow(dead_code)]
 mod history;
@@ -36,15 +39,22 @@ mod palette;
 #[path = "../../src/player.rs"]
 #[allow(dead_code)]
 mod player;
+#[path = "../../src/save.rs"]
+#[allow(dead_code)]
+mod save;
 #[path = "../../src/secret.rs"]
 mod secret;
 #[path = "../../src/stream.rs"]
 mod stream;
+#[path = "../../src/tags.rs"]
+#[allow(dead_code)]
+mod tags;
 #[path = "../../src/update.rs"]
 #[allow(dead_code)]
 mod update;
 
 mod blob;
+mod download;
 mod home;
 mod media;
 mod mood;
@@ -67,6 +77,26 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 slint::include_modules!();
+
+static UI: std::sync::OnceLock<slint::Weak<App>> = std::sync::OnceLock::new();
+
+/// Короткое сообщение над мини-плеером, с любого потока.
+pub fn toast(text: impl Into<String>) {
+    let text = text.into();
+    let Some(weak) = UI.get().cloned() else { return };
+    let _ = slint::invoke_from_event_loop(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        ui.global::<Now>().set_toast(text.as_str().into());
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_secs(3), move || {
+            if let Some(ui) = weak.upgrade() {
+                if ui.global::<Now>().get_toast() == text.as_str() {
+                    ui.global::<Now>().set_toast("".into());
+                }
+            }
+        });
+    });
+}
 
 thread_local! {
     static IMAGES: Images = Images::new(false);
@@ -98,6 +128,7 @@ fn android_main(app: slint::android::AndroidApp) {
 
 fn run() -> Result<(), slint::PlatformError> {
     let ui = App::new()?;
+    let _ = UI.set(ui.as_weak());
     let mut apk = original::Apk::open_installed();
     if apk.is_none() {
         log("Яндекс Музыка не установлена: шрифты системные, волна без шейдера");
@@ -200,6 +231,13 @@ fn logged_in(ui: &App, token: &str, player: &Player) {
     home::start(ui, api.clone(), images.clone());
     pages::start(ui, api.clone(), player.clone());
     now::start(ui, api.clone(), images);
+    let p = player.clone();
+    let a = api.clone();
+    ui.global::<Now>().on_download(move || {
+        if let Some(t) = p.state().track {
+            download::start(a.clone(), "", vec![t]);
+        }
+    });
     profile::start(ui, api);
     ui.set_logged_in(true);
 }

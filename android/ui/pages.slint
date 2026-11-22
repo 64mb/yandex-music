@@ -469,6 +469,7 @@ component AlbumHead inherits Rectangle {
             tint: #fffbe6;
             label-color: #fffbe6;
             label: "Скачать";
+            clicked => { root.action(6); }
         }
         RoundButton {
             icon: root.block.liked ? root.icons.liked : root.icons.like;

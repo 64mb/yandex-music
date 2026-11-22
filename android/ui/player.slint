@@ -420,7 +420,7 @@ export component Player inherits Rectangle {
             y: root.base + 246.3px;
             icon: Now.icons.download;
             icon-size: 24px;
-            dim: true;
+            clicked => { Now.download(); }
         }
 
         // «Моя волна по треку»: серая плашка с волной.

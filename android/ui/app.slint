@@ -574,6 +574,23 @@ export component App inherits Window {
         height: root.height;
     }
 
+    if Now.toast != "": Rectangle {
+        x: 16px;
+        y: root.height - self.height - (player.open ? 40px : Now.has-track ? 168px : 100px);
+        width: root.width - 32px;
+        height: max(48px, toast-text.preferred-height + 24px);
+        border-radius: 14px;
+        background: #333336;
+        toast-text := Text {
+            x: 16px;
+            width: parent.width - 32px;
+            text: Now.toast;
+            color: #fff;
+            font-size: 15px;
+            wrap: word-wrap;
+        }
+    }
+
     // «Назад» закрывает то, что открыто сверху; если ничего, Android сворачивает приложение.
     back := FocusScope {
         width: 0;

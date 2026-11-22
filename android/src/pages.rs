@@ -688,6 +688,10 @@ fn action(b: usize, n: i32) {
                 }
                 s.rebuild_block(b);
             }
+            (6, _) => {
+                let tracks: Vec<Track> = d.visible().iter().find(|b| matches!(b.kind, TRACKS | NUMBERED)).map(|b| b.tracks.clone()).unwrap_or_default();
+                crate::download::start(s.api.clone(), &d.title, tracks);
+            }
             (3, Entity::Album(id)) => sys::share(&format!("https://music.yandex.ru/album/{id}")),
             (3, Entity::Playlist(u, k)) => sys::share(&format!("https://music.yandex.ru/users/{u}/playlists/{k}")),
             _ => {}
@@ -984,7 +988,7 @@ fn shortcut(title: &str, icon: &str, target: &str, bg: [u8; 3], fg: [u8; 3]) -> 
     LCard { title: title.into(), extra: format!("icon:{icon}"), target: target.into(), bg: Some(bg), fg: Some(fg), ..Default::default() }
 }
 
-fn tracks_word(n: u64) -> String {
+pub fn tracks_word(n: u64) -> String {
     crate::net::tracks_word(n)
 }
 

@@ -21,6 +21,7 @@ mod mpris;
 mod net;
 mod palette;
 mod player;
+mod save;
 mod secret;
 mod stream;
 #[cfg_attr(windows, path = "sys/windows.rs")]

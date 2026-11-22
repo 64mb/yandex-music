@@ -110,6 +110,58 @@ pub fn package_path(package: &str) -> Option<PathBuf> {
     .map(PathBuf::from)
 }
 
+/// Общая папка «Музыка» во внешней памяти.
+pub fn music_dir() -> Option<PathBuf> {
+    with_env(|env, _| {
+        let kind = env.get_static_field("android/os/Environment", "DIRECTORY_MUSIC", "Ljava/lang/String;")?.l()?;
+        let dir = env
+            .call_static_method(
+                "android/os/Environment",
+                "getExternalStoragePublicDirectory",
+                "(Ljava/lang/String;)Ljava/io/File;",
+                &[JValue::Object(&kind)],
+            )?
+            .l()?;
+        let path = env.call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?.l()?;
+        java_string(env, path)
+    })
+    .map(PathBuf::from)
+}
+
+/// Показать файл в медиатеке, чтобы его сразу видели другие плееры.
+pub fn scan_file(path: &std::path::Path) {
+    with_env(|env, activity| {
+        let path = env.new_string(path.to_string_lossy())?;
+        let paths = env.new_object_array(1, "java/lang/String", &path)?;
+        let null = JObject::null();
+        env.call_static_method(
+            "android/media/MediaScannerConnection",
+            "scanFile",
+            "(Landroid/content/Context;[Ljava/lang/String;[Ljava/lang/String;Landroid/media/MediaScannerConnection$OnScanCompletedListener;)V",
+            &[JValue::Object(activity), JValue::Object(&paths), JValue::Object(&null), JValue::Object(&null)],
+        )?;
+        Ok(())
+    });
+}
+
+/// Можно ли писать в «Музыку». До Android 10 включительно на это нужно разрешение: спросим его.
+pub fn storage_permission() -> bool {
+    with_env(|env, activity| {
+        let sdk = env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?.i()?;
+        if sdk > 29 {
+            return Ok(true);
+        }
+        let perm = env.new_string("android.permission.WRITE_EXTERNAL_STORAGE")?;
+        let granted = env.call_method(activity, "checkSelfPermission", "(Ljava/lang/String;)I", &[JValue::Object(&perm)])?.i()? == 0;
+        if !granted {
+            let perms = env.new_object_array(1, "java/lang/String", &perm)?;
+            env.call_method(activity, "requestPermissions", "([Ljava/lang/String;I)V", &[JValue::Object(&perms), JValue::Int(1)])?;
+        }
+        Ok(granted)
+    })
+    .unwrap_or(false)
+}
+
 /// Включена ли тёмная тема системы.
 pub fn night_mode() -> bool {
     with_env(|env, activity| {
