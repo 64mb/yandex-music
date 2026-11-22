@@ -85,6 +85,14 @@ pub struct Shared {
     pub error: Option<(String, Instant)>,
 }
 
+/// Как положение ползунка громкости переводится в усиление.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Loudness {
+    Square,
+    /// 50 дБ на всю шкалу: каждый шаг ползунка на слух одинаковый (#44).
+    Decibels,
+}
+
 pub enum Cmd {
     Login(String),
     Logout,
@@ -95,6 +103,7 @@ pub enum Cmd {
     Prev,
     Seek(f32),
     Volume(f32),
+    Loudness(Loudness),
     LikeTrack(Track),
     Dislike,
     Wave(Source),
@@ -388,6 +397,7 @@ struct Engine {
     loaded: bool,
     paused: bool,
     volume: f32,
+    loudness: Loudness,
     repeat: Repeat,
     shuffle: bool,
     prefetch: Option<(String, Audio)>,
@@ -446,6 +456,7 @@ impl Engine {
             loaded: false,
             paused: true,
             volume: 0.6,
+            loudness: Loudness::Square,
             repeat: Repeat::Off,
             shuffle: false,
             prefetch: None,
@@ -497,6 +508,15 @@ impl Engine {
             }
         }
         self.audio.is_some()
+    }
+
+    fn gain(&self) -> f32 {
+        let v = self.volume;
+        match self.loudness {
+            Loudness::Square => v * v,
+            Loudness::Decibels if v <= 0.0 => 0.0,
+            Loudness::Decibels => 10f32.powf((v - 1.0) * 50.0 / 20.0),
+        }
     }
 
     fn pos(&self) -> f32 {
@@ -574,7 +594,7 @@ impl Engine {
         }
         let Ok(src) = Decoder::new(buf.reader()) else { return false };
         let src = Ahead::new(Eq::new(src.convert_samples::<f32>(), self.eq.clone()));
-        let (vol, paused) = (self.volume * self.volume, self.paused);
+        let (vol, paused) = (self.gain(), self.paused);
         let Some(sink) = self.sink() else { return false };
         sink.pause();
         sink.set_volume(vol);
@@ -1034,7 +1054,13 @@ impl Engine {
             Cmd::Volume(v) => {
                 self.volume = v.clamp(0.0, 1.0);
                 if let Some(s) = self.sink() {
-                    s.set_volume(self.volume * self.volume);
+                    s.set_volume(self.gain());
+                }
+            }
+            Cmd::Loudness(l) => {
+                self.loudness = l;
+                if let Some(s) = self.sink() {
+                    s.set_volume(self.gain());
                 }
             }
             Cmd::LikeTrack(t) => self.toggle_like(t),
@@ -1525,7 +1551,7 @@ impl Engine {
             return;
         }
         let src = Ahead::new(Eq::new(src.convert_samples::<f32>(), self.eq.clone()));
-        let vol = self.volume * self.volume;
+        let vol = self.gain();
         let paused = self.paused;
         if let Some(sink) = self.sink() {
             sink.clear();

@@ -11,7 +11,7 @@ use crate::assets::Sprite;
 use crate::config::{log, Config};
 use crate::images::Images;
 use crate::net::{tracks_word, Data, ListData, Net};
-use crate::player::{After, Cmd, ListKind, Player, Repeat, Source, Status};
+use crate::player::{After, Cmd, ListKind, Loudness, Player, Repeat, Source, Status};
 use crate::sys;
 use slint::winit_030::{winit, WinitWindowAccessor};
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel};
@@ -1540,6 +1540,9 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     crate::api::ALLOW_EXPLICIT.store(cfg.allow_explicit, Ordering::Relaxed);
     let player = Player::spawn(notifier());
     player.send(Cmd::Volume(cfg.volume));
+    if cfg.log_volume {
+        player.send(Cmd::Loudness(Loudness::Decibels));
+    }
     if let Some(t) = cfg.token.clone() {
         player.send(Cmd::Login(t));
     }
@@ -1567,6 +1570,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
     app.set_download_flac(cfg.download_flac);
+    app.set_log_volume(cfg.log_volume);
     app.set_hidden_blocks(landing_ui::hidden_titles(&cfg).into());
     let places = Rc::new(Places::default());
     places.mini.set(cfg.mini_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y)));
@@ -2787,6 +2791,14 @@ impl Ctx {
                 app.set_download_dir(dir.clone().into());
                 let mut st = self.st.borrow_mut();
                 st.cfg.download_dir = dir;
+                st.cfg.save();
+            }
+            "log-volume" => {
+                let on = !app.get_log_volume();
+                app.set_log_volume(on);
+                self.player.send(Cmd::Loudness(if on { Loudness::Decibels } else { Loudness::Square }));
+                let mut st = self.st.borrow_mut();
+                st.cfg.log_volume = on;
                 st.cfg.save();
             }
             "download-flac" => {
