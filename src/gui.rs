@@ -1043,15 +1043,9 @@ impl Ctx {
 
     fn play_wheel(self: &Rc<Self>, i: usize) {
         let Some(w) = self.st.borrow().wheel.get(i).cloned() else { return };
-        let seed = w.seeds.first().cloned().unwrap_or_default();
-        let source = if seed == crate::api::WAVE || seed.is_empty() {
-            Source::Wave
-        } else {
-            let station = match seed.split_once(':') {
-                Some(("artist-tracks", id)) => format!("artist:{id}"),
-                _ => seed,
-            };
-            Source::Seed { station, header: "Моя волна".into(), title: w.name.clone() }
+        let source = match w.station() {
+            Some(station) => Source::Seed { station, header: "Моя волна".into(), title: w.name.clone() },
+            None => Source::Wave,
         };
         self.player.send(Cmd::Wave(source));
         self.start();

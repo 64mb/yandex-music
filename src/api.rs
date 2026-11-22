@@ -66,6 +66,17 @@ pub struct Track {
     pub position: Option<u32>,
     /// Пакет волны, из которого пришёл трек: с ним уходит фидбек по этому треку.
     pub batch_id: String,
+    /// Оттенок и энергия трека: по ним «Моя волна» на телефоне красит фон.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub mood: Option<Mood>,
+}
+
+/// `trackParameters` из ответа API.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub struct Mood {
+    pub hue: f32,
+    pub energy: f32,
 }
 
 impl Track {
@@ -148,6 +159,20 @@ pub struct WheelItem {
     pub cover: Option<String>,
     pub round: bool,
     pub seeds: Vec<String>,
+    /// Цвет обложки: по его оттенку телефонный клиент красит подложку карточки.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub color: Option<[u8; 3]>,
+}
+
+impl WheelItem {
+    /// Станция ротора для карточки; None — обычная «Моя волна».
+    pub fn station(&self) -> Option<String> {
+        let seed = self.seeds.first().filter(|s| s.as_str() != WAVE)?;
+        Some(match seed.split_once(':') {
+            Some(("artist-tracks", id)) => format!("artist:{id}"),
+            _ => seed.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -324,7 +349,14 @@ pub(crate) fn parse_track(v: &Value) -> Option<Track> {
         year: album.and_then(|a| a.get("year")).and_then(|y| y.as_u64()).map(|y| y as u32),
         position: album.and_then(|a| a.pointer("/trackPosition/index")).and_then(|y| y.as_u64()).map(|y| y as u32),
         batch_id: String::new(),
+        mood: mood_of(v),
     })
+}
+
+fn mood_of(v: &Value) -> Option<Mood> {
+    let p = v.get("trackParameters")?;
+    let f = |k: &str| p.get(k).and_then(|x| x.as_f64()).map(|x| x as f32);
+    Some(Mood { hue: f("hue")?, energy: f("energy").unwrap_or(0.5) })
 }
 
 pub(crate) fn parse_artist(v: &Value) -> Option<Artist> {
@@ -1191,6 +1223,7 @@ impl Api {
                             description: str_of(it, "description"),
                             cover: d.pointer("/agent/cover/uri").and_then(|u| u.as_str()).map(String::from),
                             round: d.pointer("/agent/entity/type").and_then(|t| t.as_str()) == Some("artist"),
+                            color: hex_color(d.pointer("/agent/cover/color")),
                             seeds: d
                                 .pointer("/wave/seeds")
                                 .and_then(|s| s.as_array())
@@ -1201,6 +1234,14 @@ impl Api {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// Факт о треке от нейросети, как строка с искрой под плеером волны в телефоне.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub fn track_fact(&self, track_id: &str) -> Res<Option<String>> {
+        let body = json!({ "trackIds": [track_id], "viewedCards": [], "viewedBigCards": [] });
+        let v = self.send(self.req(Method::POST, "/words/cards").json(&body))?;
+        Ok(v.pointer("/0/cards/0/card/text").and_then(|t| t.as_str()).map(String::from))
     }
 
     pub fn pins(&self) -> Res<Vec<Pin>> {
