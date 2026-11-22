@@ -101,8 +101,8 @@ jobs:
           path: ${{ steps.pkg.outputs.rpm }}
           archive: false
 
-  # Нативный ARM-раннер на той же Ubuntu 22.04 (glibc 2.35) — без qemu и кросс-тулчейна.
-  # В публичных репозиториях arm64-раннеры бесплатны; в приватных идут в счёт минут.
+  # Нативный ARM-раннер на той же Ubuntu 22.04 (glibc 2.35), без qemu и кросс-тулчейна.
+  # Clippy и тесты уже прошли на x86_64, здесь только сборка и пакеты.
   linux-arm64:
     runs-on: ubuntu-22.04-arm
     steps:
@@ -111,49 +111,42 @@ jobs:
       - name: Зависимости сборки
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libasound2-dev libfontconfig1-dev libfreetype-dev \
-            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
-            libxcursor-dev libxi-dev libxrandr-dev
+          sudo apt-get install -y -qq libasound2-dev libfontconfig1-dev libfreetype-dev             libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev             libxcursor-dev libxi-dev libxrandr-dev
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@v2
 
-      - run: cargo clippy --release --all-targets -- -D warnings
-      - run: cargo test --release
       - run: cargo build --release
 
       - name: Пакеты
         id: pkg
         run: |
+          command -v cargo-deb >/dev/null || cargo install --locked cargo-deb
+          command -v cargo-generate-rpm >/dev/null || cargo install --locked cargo-generate-rpm
           tools/appimage.sh
-          # Нужны и .deb/.rpm для arm64 — раскомментируйте:
-          # command -v cargo-deb >/dev/null || cargo install --locked cargo-deb
-          # command -v cargo-generate-rpm >/dev/null || cargo install --locked cargo-generate-rpm
-          # cargo deb --no-build
-          # cargo generate-rpm
-          # echo "deb=$(ls target/debian/*.deb)" >> "$GITHUB_OUTPUT"
-          # echo "rpm=$(ls target/generate-rpm/*.rpm)" >> "$GITHUB_OUTPUT"
+          cargo deb --no-build
+          cargo generate-rpm
+          echo "deb=$(ls target/debian/*.deb)" >> "$GITHUB_OUTPUT"
+          echo "rpm=$(ls target/generate-rpm/*.rpm)" >> "$GITHUB_OUTPUT"
 
       - name: SHA-256
-        run: sha256sum target/release/yamusic-rs target/appimage/*.AppImage
+        run: sha256sum target/release/yamusic-rs target/appimage/*.AppImage ${{ steps.pkg.outputs.deb }} ${{ steps.pkg.outputs.rpm }}
 
       - uses: actions/upload-artifact@v7
         with:
           name: appimage-aarch64
           path: target/appimage/yamusic-rs-aarch64.AppImage
           archive: false
-      # - uses: actions/upload-artifact@v7
-      #   with:
-      #     name: deb-arm64
-      #     path: ${{ steps.pkg.outputs.deb }}
-      #     archive: false
-      # - uses: actions/upload-artifact@v7
-      #   with:
-      #     name: rpm-arm64
-      #     path: ${{ steps.pkg.outputs.rpm }}
-      #     archive: false
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb-arm64
+          path: ${{ steps.pkg.outputs.deb }}
+          archive: false
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpm-aarch64
+          path: ${{ steps.pkg.outputs.rpm }}
+          archive: false
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
