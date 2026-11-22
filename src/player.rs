@@ -293,7 +293,7 @@ fn open_output() -> Result<(OutputStream, rodio::OutputStreamHandle), rodio::Str
 
 fn load_track(api: &Api, t: &Track) -> Res<Audio> {
     let url = api.stream_url(&t.id)?;
-    let buf = Buf::download(api.open(&url)?);
+    let buf = Buf::download(api.open(&url)?)?;
     let dec = Decoder::new(buf.reader()).map_err(|e| format!("не удалось декодировать: {e}"))?;
     Ok((buf, dec))
 }
