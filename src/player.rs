@@ -283,13 +283,22 @@ fn open_surround() -> Option<(OutputStream, rodio::OutputStreamHandle)> {
     Some(out)
 }
 
+/// Только выход по умолчанию: `try_default` при неудаче молча берёт любое другое устройство,
+/// и звук уходит, например, в неподключённый HDMI (#53).
 fn open_output() -> Result<(OutputStream, rodio::OutputStreamHandle), rodio::StreamError> {
+    use rodio::cpal::traits::HostTrait;
     #[cfg(windows)]
     if let Some(out) = open_surround() {
         return Ok(out);
     }
-    OutputStream::try_default()
+    let dev = rodio::cpal::default_host().default_output_device().ok_or(rodio::StreamError::NoDevice)?;
+    OutputStream::try_from_device(&dev)
 }
+
+#[cfg(windows)]
+const NO_OUTPUT: &str = "Не найдено аудиоустройство";
+#[cfg(not(windows))]
+const NO_OUTPUT: &str = "Не открылся звуковой выход по умолчанию. Для PipeWire нужен pipewire-alsa";
 
 fn load_track(api: &Api, t: &Track) -> Res<Audio> {
     let url = api.stream_url(&t.id)?;
@@ -1325,7 +1334,7 @@ impl Engine {
         if let Some(pos) = self.held_pos.filter(|_| self.loaded && self.audio.is_none()) {
             if !self.restore_at(pos) {
                 self.paused = true;
-                self.error("Не найдено аудиоустройство");
+                self.error(NO_OUTPUT);
                 return;
             }
         }
