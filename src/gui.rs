@@ -2870,6 +2870,10 @@ impl Ctx {
         }
         if !l.tracks.is_empty() {
             items.push(self.menu_entry("list-playlist", "Добавить в плейлист", icons.get_m_add_playlist(), true));
+            // У «Мне нравится» скачивание вынесено кнопкой в шапку.
+            if !likes {
+                items.push(self.menu_entry("list-download", "Скачать", icons.get_m_download(), false));
+            }
         }
         items.push(self.menu_entry("list-share", "Поделиться", icons.get_m_share(), true));
         if app.get_list_own() {
@@ -3148,6 +3152,7 @@ impl Ctx {
                 }
                 "like" => self.list_like(),
                 "trailer" => self.ui().global::<App>().invoke_list_trailer(),
+                "download" => self.ui().global::<App>().invoke_list_download(),
                 "vibe" => {
                     let Some(data) = self.list() else { return };
                     let Data::List(l) = &*data else { return };
