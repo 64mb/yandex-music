@@ -1,6 +1,7 @@
 // Светлые страницы: каждая — список блоков, вид блока задаёт kind.
 
-import { Icons, Now, Cover } from "common.slint";
+import { Icons, Now, Cover, T } from "common.slint";
+import { Prof } from "profile.slint";
 
 export struct PCard {
     title: string,
@@ -137,7 +138,7 @@ component Heading inherits Rectangle {
         spacing: 4px;
         Text {
             text: root.text;
-            color: #000;
+            color: T.fg;
             font-family: "YS Display";
             font-weight: 800;
             font-size: 24px;
@@ -150,7 +151,7 @@ component Heading inherits Rectangle {
             width: 20px;
             height: 20px;
             source: root.icons.arrow-right;
-            colorize: #000;
+            colorize: T.fg;
         }
     }
     TouchArea {
@@ -182,7 +183,7 @@ component CardsRow inherits Flickable {
             y: root.size + 8px;
             width: root.size;
             text: c.title;
-            color: #000;
+            color: T.fg;
             font-size: 15px;
             font-weight: 500;
             overflow: elide;
@@ -192,7 +193,7 @@ component CardsRow inherits Flickable {
             y: root.size + 28px;
             width: root.size;
             text: c.subtitle;
-            color: #00000080;
+            color: T.fg.with-alpha(0.50);
             font-size: 13px;
             overflow: elide;
             horizontal-alignment: (root.center || c.round) ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
@@ -211,13 +212,13 @@ component TrackLine inherits Rectangle {
     callback menu();
     height: 76px;
     property <bool> current: root.item.id != "" && root.item.id == Now.track-id;
-    background: self.current ? #f5f5f5 : transparent;
+    background: self.current ? T.card : transparent;
     if root.item.pos != "": Text {
         x: root.plain ? 16px : 8px;
         width: root.plain ? 32px : 24px;
         height: parent.height;
         text: root.item.pos;
-        color: #000;
+        color: T.fg;
         font-size: 15px;
         font-weight: 500;
         horizontal-alignment: center;
@@ -248,7 +249,7 @@ component TrackLine inherits Rectangle {
         alignment: start;
         Text {
             text: root.item.title;
-            color: #000;
+            color: T.fg;
             font-size: 17px;
             font-weight: 500;
             overflow: elide;
@@ -258,7 +259,7 @@ component TrackLine inherits Rectangle {
             width: 16px;
             height: 16px;
             source: root.icons.explicit;
-            colorize: #00000080;
+            colorize: T.fg.with-alpha(0.50);
         }
     }
     Text {
@@ -266,7 +267,7 @@ component TrackLine inherits Rectangle {
         y: 40px;
         width: root.width - root.left - 64px - 48px;
         text: root.item.subtitle;
-        color: #00000080;
+        color: T.fg.with-alpha(0.50);
         font-size: 14px;
         overflow: elide;
     }
@@ -280,7 +281,7 @@ component TrackLine inherits Rectangle {
             width: 24px;
             height: 24px;
             source: root.icons.more;
-            colorize: #00000066;
+            colorize: T.fg.with-alpha(0.40);
         }
         TouchArea {
             clicked => { root.menu(); }
@@ -507,7 +508,7 @@ component ListHead inherits Rectangle {
         y: 264px;
         width: root.width - 32px;
         text: root.block.title;
-        color: #000;
+        color: T.fg;
         font-family: "YS Display";
         font-weight: 800;
         font-size: 26px;
@@ -521,7 +522,7 @@ component ListHead inherits Rectangle {
         y: 298px;
         width: root.width - 32px;
         text: root.block.subtitle;
-        color: #00000080;
+        color: T.fg.with-alpha(0.50);
         font-size: 15px;
         horizontal-alignment: center;
         overflow: elide;
@@ -533,25 +534,25 @@ component ListHead inherits Rectangle {
         spacing: 24px;
         RoundButton {
             icon: root.block.liked ? root.icons.liked : root.icons.like;
-            fill: #f2f2f2;
-            tint: root.block.liked ? #f5c400 : #000;
-            label-color: #00000080;
+            fill: T.card;
+            tint: root.block.liked ? #f5c400 : T.fg;
+            label-color: T.fg.with-alpha(0.50);
             label: root.block.text;
             clicked => { root.action(0); }
         }
         RoundButton {
             icon: root.icons.play;
             fill: #ff0;
-            tint: #000;
-            label-color: #00000080;
+            tint: T.fg;
+            label-color: T.fg.with-alpha(0.50);
             label: "Слушать";
             clicked => { root.action(2); }
         }
         RoundButton {
             icon: root.icons.share;
-            fill: #f2f2f2;
-            tint: #000;
-            label-color: #00000080;
+            fill: T.card;
+            tint: T.fg;
+            label-color: T.fg.with-alpha(0.50);
             label: "Поделиться";
             clicked => { root.action(3); }
         }
@@ -571,15 +572,15 @@ component Chips inherits Flickable {
         alignment: start;
         for c[i] in root.chips: Rectangle {
             border-radius: 20px;
-            background: i == root.chip ? #fff : #f2f2f2;
+            background: i == root.chip ? T.bg : T.card;
             border-width: i == root.chip ? 2px : 0;
-            border-color: #000;
+            border-color: T.fg;
             HorizontalLayout {
                 padding-left: 18px;
                 padding-right: 18px;
                 Text {
                     text: c;
-                    color: #000;
+                    color: T.fg;
                     font-size: 15px;
                     font-weight: 500;
                     vertical-alignment: center;
@@ -615,7 +616,7 @@ component Grid inherits Rectangle {
             y: root.cell + 8px;
             width: root.cell;
             text: c.title;
-            color: #000;
+            color: T.fg;
             font-size: 15px;
             font-weight: 500;
             overflow: elide;
@@ -625,7 +626,7 @@ component Grid inherits Rectangle {
             y: root.cell + 28px;
             width: root.cell;
             text: c.subtitle;
-            color: #00000080;
+            color: T.fg.with-alpha(0.50);
             font-size: 13px;
             overflow: elide;
         }
@@ -672,7 +673,7 @@ component ConcertGrid inherits Rectangle {
             y: root.h + 8px;
             width: root.cell;
             text: c.title;
-            color: #000;
+            color: T.fg;
             font-size: 17px;
             font-weight: 500;
             overflow: elide;
@@ -681,7 +682,7 @@ component ConcertGrid inherits Rectangle {
             y: root.h + 32px;
             width: root.cell;
             text: c.subtitle;
-            color: #00000080;
+            color: T.fg.with-alpha(0.50);
             font-size: 14px;
             overflow: elide;
         }
@@ -689,7 +690,7 @@ component ConcertGrid inherits Rectangle {
             y: root.h + 52px;
             width: root.cell;
             text: c.sub2;
-            color: #00000080;
+            color: T.fg.with-alpha(0.50);
             font-size: 14px;
             overflow: elide;
         }
@@ -800,7 +801,7 @@ component BlockView inherits Rectangle {
                 y: 16px;
                 width: parent.width - 100px;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 font-weight: 500;
                 overflow: elide;
@@ -810,7 +811,7 @@ component BlockView inherits Rectangle {
                 y: 40px;
                 width: parent.width - 100px;
                 text: c.subtitle;
-                color: #00000080;
+                color: T.fg.with-alpha(0.50);
                 font-size: 14px;
                 overflow: elide;
             }
@@ -831,7 +832,7 @@ component BlockView inherits Rectangle {
                 width: 56px;
                 height: 56px;
                 border-radius: 6px;
-                background: #e6e6e6;
+                background: T.card;
             }
             Cover {
                 x: 0;
@@ -845,7 +846,7 @@ component BlockView inherits Rectangle {
                 y: 18px;
                 width: parent.width - 84px;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 font-weight: 500;
                 overflow: elide;
@@ -856,7 +857,7 @@ component BlockView inherits Rectangle {
                 width: parent.width - 84px;
                 height: 36px;
                 text: c.subtitle;
-                color: #00000080;
+                color: T.fg.with-alpha(0.50);
                 font-size: 14px;
                 wrap: word-wrap;
                 overflow: elide;
@@ -923,7 +924,7 @@ component BlockView inherits Rectangle {
                 y: promo.w * 0.56 + 10px;
                 width: promo.width;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 18px;
                 font-weight: 500;
                 overflow: elide;
@@ -932,7 +933,7 @@ component BlockView inherits Rectangle {
                 y: promo.w * 0.56 + 34px;
                 width: promo.width;
                 text: c.subtitle;
-                color: #00000080;
+                color: T.fg.with-alpha(0.50);
                 font-size: 15px;
                 overflow: elide;
             }
@@ -1067,7 +1068,7 @@ component BlockView inherits Rectangle {
                 y: 80px;
                 width: parent.width;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 15px;
                 font-weight: 500;
                 horizontal-alignment: center;
@@ -1099,7 +1100,7 @@ component BlockView inherits Rectangle {
             y: 26px;
             width: parent.width - 150px;
             text: root.block.title;
-            color: #000;
+            color: T.fg;
             font-size: 17px;
             font-weight: 500;
             overflow: elide;
@@ -1109,7 +1110,7 @@ component BlockView inherits Rectangle {
             y: 50px;
             width: parent.width - 150px;
             text: root.block.subtitle;
-            color: #00000080;
+            color: T.fg.with-alpha(0.50);
             font-size: 15px;
             overflow: elide;
         }
@@ -1119,7 +1120,7 @@ component BlockView inherits Rectangle {
             width: 24px;
             height: 24px;
             source: root.icons.arrow-right;
-            colorize: #00000066;
+            colorize: T.fg.with-alpha(0.40);
         }
         TouchArea {
             clicked => { Pages.more(root.index); }
@@ -1182,13 +1183,13 @@ component BlockView inherits Rectangle {
                 height: 72px;
                 y: 4px;
                 border-radius: 12px;
-                background: #f2f2f2;
+                background: T.card;
                 Image {
                     width: c.sub2 == "icon" ? 32px : parent.width;
                     height: c.sub2 == "icon" ? 32px : parent.height;
                     source: c.cover;
                     image-fit: cover;
-                    colorize: c.sub2 == "icon" ? #000 : transparent;
+                    colorize: c.sub2 == "icon" ? T.fg : transparent;
                 }
             }
             Text {
@@ -1196,7 +1197,7 @@ component BlockView inherits Rectangle {
                 y: c.subtitle == "" ? 28px : 14px;
                 width: parent.width - 84px;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 font-weight: 500;
                 overflow: elide;
@@ -1207,7 +1208,7 @@ component BlockView inherits Rectangle {
                 width: parent.width - 84px;
                 height: 36px;
                 text: c.subtitle;
-                color: #00000080;
+                color: T.fg.with-alpha(0.50);
                 font-size: 14px;
                 wrap: word-wrap;
                 overflow: elide;
@@ -1229,7 +1230,7 @@ component BlockView inherits Rectangle {
                 y: 12px;
                 width: 1px;
                 height: 48px;
-                background: i == 0 ? transparent : #00000014;
+                background: i == 0 ? transparent : T.fg.with-alpha(0.08);
             }
             Text {
                 x: 12px;
@@ -1237,7 +1238,7 @@ component BlockView inherits Rectangle {
                 width: parent.width - 16px;
                 height: 48px;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 font-weight: 500;
                 wrap: word-wrap;
@@ -1337,7 +1338,7 @@ component BlockView inherits Rectangle {
                         width: 22px;
                         height: 22px;
                         source: root.icons.play-small;
-                        colorize: #000;
+                        colorize: T.fg;
                     }
                 }
             }
@@ -1366,7 +1367,7 @@ component BlockView inherits Rectangle {
                 width: 36px;
                 height: 36px;
                 source: root.icons.play;
-                colorize: #000;
+                colorize: T.fg;
             }
             TouchArea {
                 clicked => { Pages.action(root.index, 2); }
@@ -1391,7 +1392,7 @@ component BlockView inherits Rectangle {
                 y: banners.w * 0.6 + 10px;
                 width: banners.width;
                 text: c.title;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 font-weight: 500;
                 overflow: elide;
@@ -1400,7 +1401,7 @@ component BlockView inherits Rectangle {
                 y: banners.w * 0.6 + 32px;
                 width: banners.width;
                 text: c.subtitle;
-                color: #00000080;
+                color: T.fg.with-alpha(0.50);
                 font-size: 14px;
                 overflow: elide;
             }
@@ -1420,7 +1421,7 @@ component BlockView inherits Rectangle {
         y: root.top;
         width: root.width - 32px;
         text: root.kind == K.text ? root.block.text : "";
-        color: #000;
+        color: T.fg;
         font-size: 16px;
         wrap: word-wrap;
     }
@@ -1428,7 +1429,7 @@ component BlockView inherits Rectangle {
         y: root.top;
         height: 120px;
         text: root.block.text;
-        color: #00000080;
+        color: T.fg.with-alpha(0.50);
         font-size: 16px;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -1453,7 +1454,7 @@ component BlockView inherits Rectangle {
             alignment: start;
             Text {
                 text: root.block.title;
-                color: #000;
+                color: T.fg;
                 font-family: "YS Display";
                 font-weight: 800;
                 font-size: 26px;
@@ -1464,14 +1465,14 @@ component BlockView inherits Rectangle {
                 width: 20px;
                 height: 20px;
                 source: root.icons.arrow-right;
-                colorize: #000;
+                colorize: T.fg;
             }
         }
         Text {
             x: 108px;
             y: 62px;
             text: root.block.subtitle;
-            color: #00000080;
+            color: T.fg.with-alpha(0.50);
             font-size: 15px;
         }
         TouchArea {
@@ -1487,11 +1488,11 @@ export component MiniPlayer inherits Rectangle {
     height: 60px;
     border-radius: 14px;
     clip: true;
-    background: #ececec;
+    background: T.mini;
     Rectangle {
         x: 0;
         width: parent.width * clamp(Now.progress, 0, 1);
-        background: #e0e0e0;
+        background: T.mini-fill;
     }
     Cover {
         x: 10px;
@@ -1505,7 +1506,7 @@ export component MiniPlayer inherits Rectangle {
         y: 10px;
         width: parent.width - 66px - 104px;
         text: Now.title;
-        color: #000;
+        color: T.fg;
         font-size: 17px;
         font-weight: 500;
         overflow: elide;
@@ -1515,7 +1516,7 @@ export component MiniPlayer inherits Rectangle {
         y: 32px;
         width: parent.width - 66px - 104px;
         text: Now.artists;
-        color: #00000080;
+        color: T.fg.with-alpha(0.50);
         font-size: 14px;
         overflow: elide;
     }
@@ -1529,7 +1530,7 @@ export component MiniPlayer inherits Rectangle {
             width: 24px;
             height: 24px;
             source: Now.liked ? root.icons.liked : root.icons.like;
-            colorize: Now.liked ? #f5c400 : #000;
+            colorize: Now.liked ? #f5c400 : T.fg;
         }
         TouchArea {
             clicked => { Now.like(); }
@@ -1542,7 +1543,7 @@ export component MiniPlayer inherits Rectangle {
             width: 26px;
             height: 26px;
             source: Now.playing ? root.icons.pause : root.icons.play;
-            colorize: #000;
+            colorize: T.fg;
         }
         TouchArea {
             clicked => { Now.play-pause(); }
@@ -1553,7 +1554,7 @@ export component MiniPlayer inherits Rectangle {
 export component PageView inherits Rectangle {
     in property <Icons> icons;
     in property <length> bottom: 160px;
-    background: #fff;
+    background: T.bg;
     property <PPage> page: Pages.page;
     property <length> bar-y: 44px;
     property <length> bar-h: 56px;
@@ -1576,7 +1577,7 @@ export component PageView inherits Rectangle {
             if root.page.loading: Text {
                 height: 160px;
                 text: "Загружаем…";
-                color: #00000066;
+                color: T.fg.with-alpha(0.40);
                 font-size: 16px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -1584,7 +1585,7 @@ export component PageView inherits Rectangle {
             if root.page.error != "": Text {
                 height: 160px;
                 text: root.page.error;
-                color: #00000080;
+                color: T.fg.with-alpha(0.50);
                 font-size: 15px;
                 wrap: word-wrap;
                 horizontal-alignment: center;
@@ -1599,7 +1600,7 @@ export component PageView inherits Rectangle {
     Rectangle {
         y: 0;
         height: root.bar-y + root.bar-h;
-        background: root.solid ? #fff : transparent;
+        background: root.solid ? T.bg : transparent;
     }
     if !root.page.search: Text {
         x: root.page.root ? 16px : 64px;
@@ -1608,7 +1609,7 @@ export component PageView inherits Rectangle {
         height: root.bar-h;
         text: root.page.title;
         visible: root.solid;
-        color: #000;
+        color: T.fg;
         font-family: "YS Display";
         font-weight: 800;
         font-size: 22px;
@@ -1626,12 +1627,27 @@ export component PageView inherits Rectangle {
             height: 24px;
             viewbox-width: 24;
             viewbox-height: 24;
-            stroke: root.solid ? #000 : #fff;
+            stroke: root.solid ? T.fg : #fff;
             stroke-width: 2px;
             commands: "M20 12H4 M10 5l-7 7 7 7";
         }
         TouchArea {
             clicked => { Pages.back(); }
+        }
+    }
+    if root.page.root && root.page.title == "Коллекция": Rectangle {
+        x: root.width - 100px;
+        y: root.bar-y + 4px;
+        width: 48px;
+        height: 48px;
+        Image {
+            width: 24px;
+            height: 24px;
+            source: root.icons.profile;
+            colorize: T.fg;
+        }
+        TouchArea {
+            clicked => { Prof.screen = 1; }
         }
     }
     if root.page.has-search && !root.page.search: Rectangle {
@@ -1643,7 +1659,7 @@ export component PageView inherits Rectangle {
             width: 24px;
             height: 24px;
             source: root.icons.search;
-            colorize: root.solid ? #000 : #fff;
+            colorize: root.solid ? T.fg : #fff;
         }
         TouchArea {
             clicked => { Pages.open-search(); }
@@ -1655,7 +1671,7 @@ export component PageView inherits Rectangle {
         width: root.width - 24px;
         height: 52px;
         border-radius: 26px;
-        background: #fff;
+        background: T.bg;
         border-width: 1.5px;
         border-color: #d9c6ff;
         Rectangle {
@@ -1666,7 +1682,7 @@ export component PageView inherits Rectangle {
                 height: 24px;
                 viewbox-width: 24;
                 viewbox-height: 24;
-                stroke: #000;
+                stroke: T.fg;
                 stroke-width: 2px;
                 commands: "M15 4l-8 8 8 8";
             }
@@ -1687,7 +1703,7 @@ export component PageView inherits Rectangle {
             }
             TextInput {
                 text <=> Pages.query;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 vertical-alignment: center;
                 single-line: true;
@@ -1700,7 +1716,7 @@ export component PageView inherits Rectangle {
             width: parent.width - 64px;
             height: parent.height;
             text: "Трек, альбом, исполнитель, подкаст";
-            color: #00000066;
+            color: T.fg.with-alpha(0.40);
             font-size: 17px;
             vertical-alignment: center;
             overflow: elide;

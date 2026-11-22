@@ -32,6 +32,15 @@ impl Apk {
         apk
     }
 
+    /// Сплит с растровыми картинками под плотность экрана: в base.apk их нет.
+    pub fn open_density_split() -> Option<Apk> {
+        let base = crate::sys::package_path(PACKAGE)?;
+        let dir = base.parent()?;
+        ["xxhdpi", "xxxhdpi", "xhdpi", "hdpi", "mdpi"]
+            .iter()
+            .find_map(|d| Apk::open(&dir.join(format!("split_config.{d}.apk"))))
+    }
+
     fn open(path: &Path) -> Option<Apk> {
         let mut file = File::open(path).ok()?;
         let len = file.metadata().ok()?.len();
@@ -99,6 +108,17 @@ impl Apk {
             log(format!("иконка {name} не разобралась"));
         }
         svg
+    }
+
+    /// Растровая картинка `res/drawable*/<name>.webp` или `.png`.
+    pub fn raster(&mut self, name: &str) -> Option<Vec<u8>> {
+        let (webp, png) = (format!("/{name}.webp"), format!("/{name}.png"));
+        let path = self
+            .entries
+            .keys()
+            .find(|k| k.starts_with("res/drawable") && (k.ends_with(&webp) || k.ends_with(&png)))?
+            .clone();
+        self.read(&path)
     }
 
     fn dex_names(&self) -> Vec<String> {

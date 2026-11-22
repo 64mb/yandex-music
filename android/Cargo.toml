@@ -1,9 +1,10 @@
 [package]
 name = "yamusic-rs-android"
-version = "0.1.0"
+version = "1.1.4"
 edition = "2021"
 rust-version = "1.92"
 license = "GPL-3.0-only"
+repository = "https://github.com/SpolzerMod/yamusic-rs"
 publish = false
 
 # Общий код (API, вход, плеер) берётся из ../src через #[path], своего у Android только окно и sys.

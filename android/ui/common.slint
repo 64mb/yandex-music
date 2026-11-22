@@ -38,6 +38,9 @@ export struct Icons {
     clip: image,
     playlist: image,
     album: image,
+    profile: image,
+    logout: image,
+    open: image,
 }
 
 export struct WheelCard {
@@ -239,6 +242,7 @@ export component TrackRow inherits Rectangle {
 export component Sheet inherits Rectangle {
     in-out property <bool> open;
     in property <length> panel-height;
+    in property <color> panel-color: T.sheet;
     visible: root.open || panel.y < root.height - 1px;
 
     Rectangle {
@@ -256,7 +260,7 @@ export component Sheet inherits Rectangle {
         }
         width: root.width;
         height: root.panel-height + 24px;
-        background: #f5f4f2;
+        background: root.panel-color;
         border-top-left-radius: 24px;
         border-top-right-radius: 24px;
         TouchArea { }
@@ -265,8 +269,56 @@ export component Sheet inherits Rectangle {
             width: 36px;
             height: 4px;
             border-radius: 2px;
-            background: #0000001f;
+            background: T.fg.with-alpha(0.12);
         }
         @children
     }
+}
+
+export component QualityOption inherits Rectangle {
+    in property <string> title;
+    in property <string> text;
+    in property <bool> checked;
+    callback clicked();
+    VerticalLayout {
+        x: 16.7px;
+        width: parent.width - 60px;
+        alignment: start;
+        spacing: 2px;
+        Text {
+            text: root.title;
+            color: T.fg;
+            font-size: 16px;
+        }
+        Text {
+            text: root.text;
+            color: T.fg.with-alpha(0.55);
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+    }
+    if root.checked: Image {
+        x: parent.width - 42px;
+        y: 6px;
+        width: 24px;
+        height: 24px;
+        source: Now.icons.check;
+        colorize: T.fg;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Цвета светлой и тёмной темы, сняты с мобильного клиента.
+export global T {
+    in property <bool> dark;
+    out property <color> bg: root.dark ? #000 : #fff;
+    out property <color> fg: root.dark ? #fff : #000;
+    out property <color> card: root.dark ? #141414 : #f5f5f5;
+    out property <color> line: root.dark ? #262626 : #0000000d;
+    out property <color> strong: root.dark ? #e6e6e6 : #1f1f1f;
+    out property <color> mini: root.dark ? #1a1b21 : #ececec;
+    out property <color> mini-fill: root.dark ? #25262d : #e0e0e0;
+    out property <color> sheet: root.dark ? #141414 : #f5f4f2;
 }

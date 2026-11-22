@@ -49,6 +49,8 @@ pub struct Config {
     pub check_updates: bool,
     /// «Треки 18+» в меню профиля.
     pub allow_explicit: bool,
+    /// Добавлять треки в конец плейлиста, а не в начало.
+    pub add_to_end: bool,
     /// Обычное окно при выходе, в пикселях экрана. На Wayland места окна не узнать.
     pub window_pos: Option<[i32; 2]>,
     pub window_size: Option<[u32; 2]>,
@@ -91,6 +93,7 @@ impl Default for Config {
             hidden_blocks: Vec::new(),
             check_updates: true,
             allow_explicit: true,
+            add_to_end: false,
             window_pos: None,
             window_size: None,
             window_maximized: false,

@@ -40,6 +40,9 @@ mod player;
 mod secret;
 #[path = "../../src/stream.rs"]
 mod stream;
+#[path = "../../src/update.rs"]
+#[allow(dead_code)]
+mod update;
 
 mod blob;
 mod home;
@@ -47,6 +50,7 @@ mod mood;
 mod now;
 mod original;
 mod pages;
+mod profile;
 mod sys;
 mod vector;
 mod wave_gl;
@@ -100,6 +104,7 @@ fn run() -> Result<(), slint::PlatformError> {
         original::wave_shader(a)
     });
     drop(apk);
+    profile::load_pictures(&ui);
 
     let wave: Rc<RefCell<Option<wave_gl::Wave>>> = Default::default();
     if let Some(src) = shader {
@@ -118,6 +123,14 @@ fn run() -> Result<(), slint::PlatformError> {
 
     // Громкость на телефоне задают кнопки системы, своего ползунка у оригинала нет.
     player.send(Cmd::Volume(1.0));
+    profile::bind(&ui, &player);
+    {
+        let (weak, p) = (ui.as_weak(), player.clone());
+        ui.global::<Prof>().on_logout(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            logout(&ui, &p);
+        });
+    }
     let cfg = Config::load();
     api::QUALITY.store(cfg.quality, std::sync::atomic::Ordering::Relaxed);
     ui.global::<Now>().set_quality(quality_index(cfg.quality));
@@ -178,8 +191,29 @@ fn logged_in(ui: &App, token: &str, player: &Player) {
     let images = IMAGES.with(|i| i.clone());
     home::start(ui, api.clone(), images.clone());
     pages::start(ui, api.clone(), player.clone());
-    now::start(ui, api, images);
+    now::start(ui, api.clone(), images);
+    profile::start(ui, api);
     ui.set_logged_in(true);
+}
+
+fn logout(ui: &App, player: &Player) {
+    player.send(Cmd::Logout);
+    let mut c = Config::load();
+    if let Some(token) = c.token.clone() {
+        std::thread::spawn(move || {
+            if let Err(e) = auth::revoke(&token) {
+                log(format!("выход: токен не отозван: {e}"));
+            }
+        });
+    }
+    c.forget_token();
+    c.forget_refresh();
+    c.token_expires = None;
+    c.save();
+    profile::clear(ui);
+    ui.set_tab(0);
+    ui.global::<Pages>().set_shown(false);
+    start_login(ui, player.clone());
 }
 
 /// Кнопки плеера, шторок и плашки волны.
@@ -514,6 +548,9 @@ fn load_icons(apk: &mut original::Apk) -> Icons {
         clip: icon("ic_clip_24"),
         playlist: icon("ic_playlist_24"),
         album: icon("ic_album_24"),
+        profile: icon("ui_kit_ic_profile_24"),
+        logout: icon("ic_logout_24"),
+        open: icon("ui_kit_ic_open_new_24"),
     }
 }
 

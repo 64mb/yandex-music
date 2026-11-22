@@ -110,6 +110,17 @@ pub fn package_path(package: &str) -> Option<PathBuf> {
     .map(PathBuf::from)
 }
 
+/// Включена ли тёмная тема системы.
+pub fn night_mode() -> bool {
+    with_env(|env, activity| {
+        let res = env.call_method(activity, "getResources", "()Landroid/content/res/Resources;", &[])?.l()?;
+        let conf = env.call_method(&res, "getConfiguration", "()Landroid/content/res/Configuration;", &[])?.l()?;
+        // UI_MODE_NIGHT_MASK и UI_MODE_NIGHT_YES.
+        Ok(env.get_field(&conf, "uiMode", "I")?.i()? & 0x30 == 0x20)
+    })
+    .unwrap_or(false)
+}
+
 fn java_string(env: &mut JNIEnv, obj: JObject) -> jni::errors::Result<String> {
     Ok(env.get_string(&JString::from(obj))?.into())
 }

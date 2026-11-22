@@ -441,6 +441,9 @@ pub static LESS_AI: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// пропускает треки с пометкой E, как оригинал с фильтром очереди.
 pub static ALLOW_EXPLICIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
+/// «Добавлять треки в конец плейлиста».
+pub static ADD_TO_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn allow_explicit() -> bool {
     ALLOW_EXPLICIT.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -1516,7 +1519,7 @@ impl Api {
         parse_playlist(&v).ok_or_else(|| "Яндекс не вернул новый плейлист".into())
     }
 
-    /// Добавляет треки в начало плейлиста одним запросом, порядок сохраняется.
+    /// Добавляет треки в начало плейлиста или в конец (`ADD_TO_END`) одним запросом.
     /// Ревизию берём свежую, иначе API отвечает 412.
     pub fn add_to_playlist(&self, uid: &str, kind: &str, tracks: &[Track]) -> Res<()> {
         let v = self.get(&format!("/users/{uid}/playlists/{kind}"), &[])?;
@@ -1531,7 +1534,12 @@ impl Api {
                 item
             })
             .collect();
-        let diff = json!([{ "op": "insert", "at": 0, "tracks": items }]).to_string();
+        let at = if ADD_TO_END.load(std::sync::atomic::Ordering::Relaxed) {
+            v.get("trackCount").and_then(|n| n.as_u64()).unwrap_or(0)
+        } else {
+            0
+        };
+        let diff = json!([{ "op": "insert", "at": at, "tracks": items }]).to_string();
         self.send(
             self.req(Method::POST, &format!("/users/{uid}/playlists/{kind}/change-relative"))
                 .form(&[("kind", kind), ("revision", revision.as_str()), ("diff", diff.as_str())]),

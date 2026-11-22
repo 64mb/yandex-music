@@ -1,12 +1,13 @@
 // Экран «Моей волны» как в официальном Android-клиенте. Размеры в dp сняты с оригинала
 // на экране 1080×2400 (420 dpi). Фон с волной рисует OpenGL под окном, поэтому окно прозрачное.
 
-import { Icons, WheelCard, Row, ArtistCard, Now, Cover } from "common.slint";
+import { Icons, WheelCard, Row, ArtistCard, Now, Cover, T } from "common.slint";
 import { Player } from "player.slint";
 import { MenuSheet, QualitySheet, TimerSheet, TrackSheet, PickSheet } from "sheets.slint";
+import { Prof, ProfileScreens, AboutPage, LogoutSheet } from "profile.slint";
 import { Pages, PageView, MiniPlayer, PCard, PRow, PBlock, PPage } from "pages.slint";
 
-export { Icons, WheelCard, Row, ArtistCard, Now, Pages, PCard, PRow, PBlock, PPage }
+export { Icons, WheelCard, Row, ArtistCard, Now, Pages, PCard, PRow, PBlock, PPage, Prof, T }
 
 component TabIcon inherits Rectangle {
     in property <image> icon;
@@ -470,6 +471,13 @@ export component App inherits Window {
         bottom: Now.has-track ? 176px : 100px;
     }
 
+    if root.logged-in && Pages.shown && Prof.screen > 0: ProfileScreens {
+        width: root.width;
+        height: root.height;
+        icons: root.icons;
+        bottom: Now.has-track ? 176px : 100px;
+    }
+
     if root.logged-in && Pages.shown && Now.has-track && !Pages.viewer-open: MiniPlayer {
         x: 12px;
         y: root.height - 75.8px - 8px - self.height;
@@ -482,7 +490,7 @@ export component App inherits Window {
     if root.logged-in && !Pages.viewer-open: Rectangle {
         y: root.height - 83.8px;
         height: 83.8px;
-        background: Pages.shown ? #fff : transparent;
+        background: Pages.shown ? T.bg : transparent;
         HorizontalLayout {
             y: 8px;
             height: 48px;
@@ -491,23 +499,35 @@ export component App inherits Window {
             alignment: space-between;
             TabIcon {
                 icon: root.icons.tab-wave;
-                tint: root.tab == 0 ? (Pages.shown ? #000 : #ff0) : (Pages.shown ? #00000066 : #ffffff80);
-                clicked => { root.tab-clicked(0); }
+                tint: root.tab == 0 ? (Pages.shown ? T.fg : #ff0) : (Pages.shown ? T.fg.with-alpha(0.40) : #ffffff80);
+                clicked => {
+                    Prof.screen = 0;
+                    root.tab-clicked(0);
+                }
             }
             TabIcon {
                 icon: root.icons.tab-home;
-                tint: root.tab == 1 ? #000 : (Pages.shown ? #00000066 : #ffffff80);
-                clicked => { root.tab-clicked(1); }
+                tint: root.tab == 1 ? T.fg : (Pages.shown ? T.fg.with-alpha(0.40) : #ffffff80);
+                clicked => {
+                    Prof.screen = 0;
+                    root.tab-clicked(1);
+                }
             }
             TabIcon {
                 icon: root.icons.tab-concerts;
-                tint: root.tab == 2 ? #000 : (Pages.shown ? #00000066 : #ffffff80);
-                clicked => { root.tab-clicked(2); }
+                tint: root.tab == 2 ? T.fg : (Pages.shown ? T.fg.with-alpha(0.40) : #ffffff80);
+                clicked => {
+                    Prof.screen = 0;
+                    root.tab-clicked(2);
+                }
             }
             TabIcon {
                 icon: root.icons.tab-collection;
-                tint: root.tab == 3 ? #000 : (Pages.shown ? #00000066 : #ffffff80);
-                clicked => { root.tab-clicked(3); }
+                tint: root.tab == 3 ? T.fg : (Pages.shown ? T.fg.with-alpha(0.40) : #ffffff80);
+                clicked => {
+                    Prof.screen = 0;
+                    root.tab-clicked(3);
+                }
             }
         }
     }
@@ -545,6 +565,15 @@ export component App inherits Window {
         height: root.height;
     }
 
+    if Prof.about-open: AboutPage {
+        width: root.width;
+        height: root.height;
+    }
+    LogoutSheet {
+        width: root.width;
+        height: root.height;
+    }
+
     // «Назад» закрывает то, что открыто сверху; если ничего, Android сворачивает приложение.
     back := FocusScope {
         width: 0;
@@ -553,7 +582,11 @@ export component App inherits Window {
             if e.text != Key.Back {
                 return reject;
             }
-            if Pages.pick-open {
+            if Prof.logout-open {
+                Prof.logout-open = false;
+            } else if Prof.about-open {
+                Prof.about-open = false;
+            } else if Pages.pick-open {
                 Pages.pick-open = false;
             } else if Pages.menu-open {
                 Pages.menu-open = false;
@@ -571,6 +604,8 @@ export component App inherits Window {
                 player.queue-open = false;
             } else if player.open {
                 player.open = false;
+            } else if Prof.screen > 0 {
+                Prof.back();
             } else if Pages.shown {
                 Pages.back();
             } else {

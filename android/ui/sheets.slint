@@ -1,6 +1,6 @@
 // Шторки плеера на светлом фоне: меню трека, настройки звука, таймер сна.
 
-import { Now, Sheet, Cover } from "common.slint";
+import { Now, Sheet, Cover, QualityOption, T } from "common.slint";
 import { Pages } from "pages.slint";
 
 component MenuItem inherits Rectangle {
@@ -14,12 +14,12 @@ component MenuItem inherits Rectangle {
         width: 24px;
         height: 24px;
         source: root.icon;
-        colorize: root.grey ? #0000008c : #000000e6;
+        colorize: root.grey ? T.fg.with-alpha(0.55) : T.fg.with-alpha(0.90);
     }
     Text {
         x: 60px;
         text: root.text;
-        color: root.grey ? #0000008c : #000000e6;
+        color: root.grey ? T.fg.with-alpha(0.55) : T.fg.with-alpha(0.90);
         font-size: 17px;
         vertical-alignment: center;
     }
@@ -31,7 +31,7 @@ component MenuItem inherits Rectangle {
 component RoundItem inherits Rectangle {
     in property <image> icon;
     in property <string> text;
-    in property <color> tint: #000000e6;
+    in property <color> tint: T.fg.with-alpha(0.90);
     callback clicked();
     width: 96px;
     height: 112px;
@@ -41,7 +41,7 @@ component RoundItem inherits Rectangle {
         width: 64px;
         height: 64px;
         border-radius: 32px;
-        background: #0000000f;
+        background: T.fg.with-alpha(0.06);
         Image {
             width: 28px;
             height: 28px;
@@ -53,7 +53,7 @@ component RoundItem inherits Rectangle {
         y: 76px;
         width: parent.width;
         text: root.text;
-        color: #000000e6;
+        color: T.fg.with-alpha(0.90);
         font-size: 15px;
         horizontal-alignment: center;
     }
@@ -79,7 +79,7 @@ export component TrackSheet inherits Sheet {
         y: 55px;
         width: parent.width - 124px;
         text: Pages.menu-track.title;
-        color: #000;
+        color: T.fg;
         font-size: 22px;
         font-weight: 700;
         overflow: elide;
@@ -89,7 +89,7 @@ export component TrackSheet inherits Sheet {
         y: 84px;
         width: parent.width - 124px;
         text: Pages.menu-track.subtitle;
-        color: #0000008c;
+        color: T.fg.with-alpha(0.55);
         font-size: 15px;
         overflow: elide;
     }
@@ -143,7 +143,7 @@ export component TrackSheet inherits Sheet {
         x: parent.width / 2 - 144px;
         y: 232px;
         icon: Pages.menu-liked ? Now.icons.liked : Now.icons.like;
-        tint: Pages.menu-liked ? #f2c200 : #000000e6;
+        tint: Pages.menu-liked ? #f2c200 : T.fg.with-alpha(0.90);
         text: "Нравится";
         clicked => { Pages.menu-action(1); }
     }
@@ -208,7 +208,7 @@ export component TrackSheet inherits Sheet {
         y: 556px;
         width: parent.width - 32px;
         height: 1px;
-        background: #0000001a;
+        background: T.fg.with-alpha(0.10);
     }
     MenuItem {
         y: 564px;
@@ -230,7 +230,7 @@ export component PickSheet inherits Sheet {
         x: 16px;
         y: 30px;
         text: "Добавить в плейлист";
-        color: #000;
+        color: T.fg;
         font-size: 22px;
         font-weight: 700;
     }
@@ -253,7 +253,7 @@ export component PickSheet inherits Sheet {
                 y: 16px;
                 width: parent.width - 100px;
                 text: row.title;
-                color: #000;
+                color: T.fg;
                 font-size: 17px;
                 font-weight: 500;
                 overflow: elide;
@@ -263,7 +263,7 @@ export component PickSheet inherits Sheet {
                 y: 40px;
                 width: parent.width - 100px;
                 text: row.subtitle;
-                color: #0000008c;
+                color: T.fg.with-alpha(0.55);
                 font-size: 14px;
                 overflow: elide;
             }
@@ -295,7 +295,7 @@ export component MenuSheet inherits Sheet {
         y: 55px;
         width: parent.width - 124px;
         text: Now.title;
-        color: #000;
+        color: T.fg;
         font-size: 22px;
         font-weight: 700;
         overflow: elide;
@@ -304,7 +304,7 @@ export component MenuSheet inherits Sheet {
         x: 108px;
         y: 84px;
         text: Now.duration-text;
-        color: #0000008c;
+        color: T.fg.with-alpha(0.55);
         font-size: 15px;
     }
     Cover {
@@ -320,7 +320,7 @@ export component MenuSheet inherits Sheet {
         y: 141px;
         width: parent.width - 76px;
         text: Now.artists;
-        color: #000000e6;
+        color: T.fg.with-alpha(0.90);
         font-size: 17px;
         overflow: elide;
     }
@@ -382,7 +382,7 @@ export component MenuSheet inherits Sheet {
         x: parent.width / 2 - 96px;
         y: 307.4px;
         icon: Now.liked ? Now.icons.liked : Now.icons.like;
-        tint: Now.liked ? #f2c200 : #000000e6;
+        tint: Now.liked ? #f2c200 : T.fg.with-alpha(0.90);
         text: "Нравится";
         clicked => { Now.like(); }
     }
@@ -428,7 +428,7 @@ export component MenuSheet inherits Sheet {
         y: 572px;
         width: parent.width - 32px;
         height: 1px;
-        background: #0000001a;
+        background: T.fg.with-alpha(0.10);
     }
     MenuItem {
         y: 579.5px;
@@ -442,48 +442,13 @@ export component MenuSheet inherits Sheet {
     }
 }
 
-component QualityOption inherits Rectangle {
-    in property <string> title;
-    in property <string> text;
-    in property <bool> checked;
-    callback clicked();
-    VerticalLayout {
-        x: 16.7px;
-        width: parent.width - 60px;
-        alignment: start;
-        spacing: 2px;
-        Text {
-            text: root.title;
-            color: #000;
-            font-size: 16px;
-        }
-        Text {
-            text: root.text;
-            color: #0000008c;
-            font-size: 14px;
-            wrap: word-wrap;
-        }
-    }
-    if root.checked: Image {
-        x: parent.width - 42px;
-        y: 6px;
-        width: 24px;
-        height: 24px;
-        source: Now.icons.check;
-        colorize: #000;
-    }
-    TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
-
 export component QualitySheet inherits Sheet {
     panel-height: 470px;
     Text {
         y: 38px;
         width: parent.width;
         text: "Настройки звука";
-        color: #000;
+        color: T.fg;
         font-family: "YS Music Headline";
         font-weight: 700;
         font-size: 22px;
@@ -541,7 +506,7 @@ export component TimerSheet inherits Sheet {
         y: 47px;
         width: parent.width;
         text: "Таймер сна";
-        color: #000;
+        color: T.fg;
         font-family: "YS Music Headline";
         font-weight: 700;
         font-size: 22px;
@@ -551,7 +516,7 @@ export component TimerSheet inherits Sheet {
         x: 20.4px;
         y: 116.9px;
         text: "Конец трека или выпуска";
-        color: #000000e6;
+        color: T.fg.with-alpha(0.90);
         font-size: 16px;
     }
     Rectangle {
@@ -563,7 +528,7 @@ export component TimerSheet inherits Sheet {
             y: 5px;
             height: 14px;
             border-radius: 7px;
-            background: root.end-of-track ? #000000b3 : #0000004d;
+            background: root.end-of-track ? T.fg.with-alpha(0.70) : T.fg.with-alpha(0.30);
         }
         Rectangle {
             x: root.end-of-track ? parent.width - self.width : 0;
@@ -589,7 +554,7 @@ export component TimerSheet inherits Sheet {
         height: 2 * root.r;
         viewbox-width: 2 * root.r / 1px;
         viewbox-height: 2 * root.r / 1px;
-        stroke: #00000014;
+        stroke: T.fg.with-alpha(0.08);
         stroke-width: 3px;
         commands: "M " + (root.r / 1px) + " 1.5 A " + (root.r / 1px - 1.5) + " " + (root.r / 1px - 1.5) + " 0 1 1 " + (root.r / 1px - 0.01) + " 1.5";
         opacity: root.end-of-track ? 0.4 : 1;
@@ -621,7 +586,7 @@ export component TimerSheet inherits Sheet {
         width: 40px;
         height: 24px;
         text: i * 5;
-        color: #0000008c;
+        color: T.fg.with-alpha(0.55);
         font-size: 17px;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -631,7 +596,7 @@ export component TimerSheet inherits Sheet {
         width: parent.width;
         height: 60px;
         text: Now.timer-on ? Now.timer-left : (root.minutes < 10 ? "0" : "") + root.minutes + ":00";
-        color: #000;
+        color: T.fg;
         font-family: "YS Display";
         font-weight: 700;
         font-size: 40px;
