@@ -300,6 +300,9 @@ const NO_OUTPUT: &str = "Не найдено аудиоустройство";
 #[cfg(not(windows))]
 const NO_OUTPUT: &str = "Не открылся звуковой выход по умолчанию. Для PipeWire нужен pipewire-alsa";
 
+/// Сколько позиция может стоять на месте у играющего скачанного трека.
+const STALL_LIMIT: Duration = Duration::from_secs(3);
+
 fn load_track(api: &Api, t: &Track) -> Res<Audio> {
     let url = api.stream_url(&t.id)?;
     let buf = Buf::download(api.open(&url)?)?;
@@ -351,6 +354,8 @@ struct Engine {
     out_checked: Instant,
     /// Выход пропал посреди трека: с этого места трек продолжится по Play.
     held_pos: Option<f32>,
+    /// Позиция играющего трека и с какого момента она не меняется.
+    stall: (f32, Instant),
     api: Option<Api>,
     uid: String,
     source: Source,
@@ -415,6 +420,7 @@ impl Engine {
             #[cfg(windows)]
             out_checked: Instant::now(),
             held_pos: None,
+            stall: (0.0, Instant::now()),
             api: None,
             uid: String::new(),
             source: Source::Wave,
@@ -513,13 +519,40 @@ impl Engine {
         }
         log(format!("аудиовыход: {} → {}", self.out_name.as_deref().unwrap_or("нет"), now.as_deref().unwrap_or("нет")));
         let pos = self.pos();
+        self.reopen_output(pos, now.is_some());
+    }
+
+    /// Трек играет и скачан целиком, а позиция стоит: выход умер молча. На Linux так бывает
+    /// после блокировки экрана (#49).
+    fn check_stall(&mut self) {
+        let pos = self.pos();
+        let playing = self.loaded
+            && !self.paused
+            && self.current_buf.as_ref().is_some_and(|b| b.done())
+            && self.sink().is_some_and(|s| !s.empty());
+        if !playing || pos != self.stall.0 {
+            self.stall = (pos, Instant::now());
+            return;
+        }
+        if self.stall.1.elapsed() < STALL_LIMIT {
+            return;
+        }
+        log(format!("звук встал на {pos:.1} с, выход переоткрывается"));
+        self.stall = (pos, Instant::now());
+        self.reopen_output(pos, true);
+    }
+
+    /// Закрыть выход и продолжить трек с `pos` на новом. Не вышло — пауза до Play с того же места.
+    fn reopen_output(&mut self, pos: f32, available: bool) {
         self.audio = None;
-        self.out_name = None;
+        #[cfg(windows)]
+        {
+            self.out_name = None;
+        }
         if !self.loaded {
             return;
         }
-        if now.is_none() || !self.restore_at(pos) {
-            // Выхода нет: трек встаёт на паузу и ждёт Play с того же места.
+        if !available || !self.restore_at(pos) {
             self.held_pos = Some(pos);
             if !self.paused {
                 self.paused = true;
@@ -818,6 +851,7 @@ impl Engine {
     fn tick(&mut self) {
         #[cfg(windows)]
         self.check_output();
+        self.check_stall();
         if let Some(at) = self.retry_at {
             if Instant::now() >= at {
                 self.retry_at = None;

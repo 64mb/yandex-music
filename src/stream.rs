@@ -73,6 +73,11 @@ impl Buf {
         Reader { buf: self.clone(), pos: 0 }
     }
 
+    /// Загрузка закончилась, успешно или нет.
+    pub fn done(&self) -> bool {
+        self.state.lock().unwrap().done
+    }
+
     /// Ждёт, пока придёт больше `pos` байтов или загрузка закончится.
     fn wait_past(&self, pos: u64) -> io::Result<MutexGuard<'_, State>> {
         let mut st = self.state.lock().unwrap();
