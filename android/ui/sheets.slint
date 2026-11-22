@@ -630,7 +630,7 @@ export component TimerSheet inherits Sheet {
         height: 60px;
         text: Now.timer-on ? Now.timer-left : (root.minutes < 10 ? "0" : "") + root.minutes + ":00";
         color: T.fg;
-        font-family: "YS Display";
+        font-family: T.display-font;
         font-weight: 700;
         font-size: 40px;
         horizontal-alignment: center;

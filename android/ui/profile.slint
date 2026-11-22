@@ -155,13 +155,15 @@ component Section inherits Text {
     vertical-alignment: bottom;
     x: 16px;
     color: T.fg;
-    font-family: "YS Display";
+    font-family: T.display-font;
     font-weight: 800;
     font-size: 24px;
 }
 
 component ThemeCard inherits Rectangle {
     in property <image> picture;
+    // 0 системная, 1 светлая, 2 тёмная.
+    in property <int> mode;
     in property <string> title;
     in property <bool> selected;
     callback clicked();
@@ -176,6 +178,42 @@ component ThemeCard inherits Rectangle {
         height: 60px;
         source: root.picture;
         image-fit: contain;
+    }
+    // Без оригинала картинок нет: рисуем телефон сами. У системной темы он наполовину светлый.
+    if root.picture.width == 0: Rectangle {
+        y: 14px;
+        width: 38px;
+        height: 64px;
+        border-radius: 7px;
+        border-width: 1.5px;
+        border-color: #808080;
+        clip: true;
+        Rectangle {
+            x: 0;
+            width: root.mode == 1 ? parent.width : root.mode == 2 ? 0 : parent.width / 2;
+            background: #f2f2f2;
+        }
+        Rectangle {
+            x: root.mode == 2 ? 0 : root.mode == 1 ? parent.width : parent.width / 2;
+            width: parent.width - self.x;
+            background: #141414;
+        }
+        Rectangle {
+            x: 6px;
+            y: 10px;
+            width: 26px;
+            height: 26px;
+            border-radius: 13px;
+            background: #ff0;
+        }
+        for i in 2: Rectangle {
+            x: 6px;
+            y: 43px + i * 7px;
+            width: i == 0 ? 26px : 18px;
+            height: 3px;
+            border-radius: 1.5px;
+            background: #8080807f;
+        }
     }
     Text {
         y: 83px;
@@ -264,7 +302,7 @@ component Screen inherits Rectangle {
             y: 6px;
             text: root.title;
             color: T.fg;
-            font-family: "YS Display";
+            font-family: T.display-font;
             font-weight: 800;
             font-size: 30px;
         }
@@ -290,7 +328,7 @@ component Screen inherits Rectangle {
         height: 56px;
         text: root.title;
         color: T.fg;
-        font-family: "YS Display";
+        font-family: T.display-font;
         font-weight: 800;
         font-size: 22px;
         vertical-alignment: center;
@@ -464,6 +502,7 @@ component SettingsPage inherits Screen {
                 spacing: 8.4px;
                 ThemeCard {
                     picture: Prof.theme-system;
+                    mode: 0;
                     title: "Системная";
                     selected: Prof.theme == 0;
                     clicked => {
@@ -473,6 +512,7 @@ component SettingsPage inherits Screen {
                 }
                 ThemeCard {
                     picture: Prof.theme-light;
+                    mode: 1;
                     title: "Светлая";
                     selected: Prof.theme == 1;
                     clicked => {
@@ -482,6 +522,7 @@ component SettingsPage inherits Screen {
                 }
                 ThemeCard {
                     picture: Prof.theme-dark;
+                    mode: 2;
                     title: "Тёмная";
                     selected: Prof.theme == 2;
                     clicked => {
@@ -681,7 +722,7 @@ export component AboutPage inherits Rectangle {
         y: 106px;
         text: "О приложении";
         color: T.fg;
-        font-family: "YS Display";
+        font-family: T.display-font;
         font-weight: 800;
         font-size: 30px;
     }

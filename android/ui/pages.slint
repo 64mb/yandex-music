@@ -143,7 +143,7 @@ component Heading inherits Rectangle {
         Text {
             text: root.text;
             color: T.fg;
-            font-family: "YS Display";
+            font-family: T.display-font;
             font-weight: 800;
             font-size: 24px;
             vertical-alignment: center;
@@ -430,7 +430,7 @@ component AlbumHead inherits Rectangle {
         width: root.width - 32px;
         text: root.block.title;
         color: #fffbe6;
-        font-family: "YS Display";
+        font-family: T.display-font;
         font-weight: 800;
         font-size: 30px;
         horizontal-alignment: center;
@@ -514,7 +514,7 @@ component ListHead inherits Rectangle {
         width: root.width - 32px;
         text: root.block.title;
         color: T.fg;
-        font-family: "YS Display";
+        font-family: T.display-font;
         font-weight: 800;
         font-size: 26px;
         horizontal-alignment: center;
@@ -670,7 +670,7 @@ component ConcertGrid inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 Text { text: c.month; color: #000; font-size: 14px; horizontal-alignment: center; }
-                Text { text: c.day; color: #000; font-size: 30px; font-weight: 800; font-family: "YS Display"; horizontal-alignment: center; }
+                Text { text: c.day; color: #000; font-size: 30px; font-weight: 800; font-family: T.display-font; horizontal-alignment: center; }
                 Text { text: c.weekday; color: #000; font-size: 14px; horizontal-alignment: center; }
             }
         }
@@ -1460,7 +1460,7 @@ component BlockView inherits Rectangle {
             Text {
                 text: root.block.title;
                 color: T.fg;
-                font-family: "YS Display";
+                font-family: T.display-font;
                 font-weight: 800;
                 font-size: 26px;
                 vertical-alignment: center;
@@ -1615,7 +1615,7 @@ export component PageView inherits Rectangle {
         text: root.page.title;
         visible: root.solid;
         color: T.fg;
-        font-family: "YS Display";
+        font-family: T.display-font;
         font-weight: 800;
         font-size: 22px;
         horizontal-alignment: root.page.root ? left : center;

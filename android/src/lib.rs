@@ -129,18 +129,20 @@ fn android_main(app: slint::android::AndroidApp) {
 fn run() -> Result<(), slint::PlatformError> {
     let ui = App::new()?;
     let _ = UI.set(ui.as_weak());
-    let mut apk = original::Apk::open_installed();
-    if apk.is_none() {
-        log("Яндекс Музыка не установлена: шрифты системные, волна без шейдера");
-    }
-    let shader = apk.as_mut().and_then(|a| {
-        original::register_fonts(a);
-        let icons = load_icons(a);
-        ui.set_icons(icons.clone());
-        ui.global::<Now>().set_icons(icons);
-        original::wave_shader(a)
-    });
-    drop(apk);
+    let shader = match original::Apk::open_installed() {
+        Some(mut apk) => {
+            original::register_fonts(&mut apk);
+            set_icons(&ui, load_icons(|name| apk.icon(name).and_then(|svg| slint::Image::load_from_svg_data(svg.as_bytes()).ok())));
+            original::wave_shader(&mut apk)
+        }
+        None => {
+            log("Яндекс Музыка не установлена: шрифты и иконки с music.yandex.ru, волна своя");
+            load_web_assets(&ui);
+            // Свой фон: три мягких пятна из палитры настроения кружат над заголовком.
+            // Комментарии в .frag только латиницей: часть драйверов GLSL ES не берёт остальное.
+            Some(include_str!("wave.frag").to_string())
+        }
+    };
     profile::load_pictures(&ui);
 
     let wave: Rc<RefCell<Option<wave_gl::Wave>>> = Default::default();
@@ -555,10 +557,90 @@ fn start_login(ui: &App, player: Player) {
     });
 }
 
-fn load_icons(apk: &mut original::Apk) -> Icons {
-    let mut icon = |name: &str| {
-        apk.icon(name).and_then(|svg| slint::Image::load_from_svg_data(svg.as_bytes()).ok()).unwrap_or_default()
+fn set_icons(ui: &App, icons: Icons) {
+    ui.set_icons(icons.clone());
+    ui.global::<Now>().set_icons(icons);
+}
+
+/// Те же файлы, что берёт десктоп без оригинала. Шрифта YS Display в веб-версии нет.
+fn load_web_assets(ui: &App) {
+    let mut src = crate::assets::Source::open();
+    crate::assets::register_fonts(&mut src);
+    ui.global::<T>().set_display_font("YS Text".into());
+    let Some(sprite) = crate::assets::Sprite::load(&mut src) else {
+        log("спрайт иконок music.yandex.ru не скачался");
+        return;
     };
+    let vars = std::collections::HashMap::from([
+        ("--ym-logo-color-primary-back", "transparent"),
+        ("--ym-logo-text-color", "#fff"),
+        ("currentColor", "#fff"),
+    ]);
+    set_icons(ui, load_icons(|name| {
+        if let Some((_, svg)) = OWN_ICONS.iter().find(|(android, _)| *android == name) {
+            return slint::Image::load_from_svg_data(svg.as_bytes()).ok();
+        }
+        let id = WEB_ICONS.iter().find(|(android, _)| *android == name)?.1;
+        Some(sprite.image(id, &vars))
+    }));
+}
+
+/// Иконки, для которых в спрайте веб-версии нет похожих.
+const OWN_ICONS: &[(&str, &str)] = &[
+    (
+        "ui_kit_ic_profile_24",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c1.4-3.3 4.2-5 7.5-5s6.1 1.7 7.5 5"/></svg>"##,
+    ),
+    (
+        "ic_logout_24",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20H10"/><path d="M15 8l4 4-4 4M19 12H9"/></svg>"##,
+    ),
+];
+
+/// Иконки Android и ближайшие к ним символы спрайта веб-версии.
+const WEB_ICONS: &[(&str, &str)] = &[
+    ("ic_yandex_music_logo_ru", "musicLogoLeftRu"),
+    ("ic_search_24", "search_xs"),
+    ("ic_play_32", "play_m"),
+    ("ic_pause_32", "pause_m"),
+    ("ic_like_unactive_24", "like_xs"),
+    ("ic_like_active_24", "liked_xs"),
+    ("ic_android_my_wibe", "navigationMyVibe_xs"),
+    ("ic_landing_default", "home_m"),
+    ("ic_android_concerts_light_theme_default", "navigationConcerts_xs"),
+    ("ic_android_my_music_test_default", "navigationCollection_xs"),
+    ("ic_arrow_mid_down_24", "arrowDown_xs"),
+    ("ui_kit_ic_list_24", "playQueue_xs"),
+    ("ic_share_new_24", "share_m"),
+    ("ic_more_24", "more_xs"),
+    ("ic_dislike_24", "dislike_xs"),
+    ("ic_repeat_default_40", "repeat_xs"),
+    ("ic_repeat_active_1_40", "repeat_one_xs"),
+    ("ic_lyrics_default_40", "syncLyrics_m"),
+    ("ui_kit_ic_download_24", "download_xxs"),
+    ("ic_timer_24", "history_m"),
+    ("ui_kit_ic_filter_24", "filter_xs"),
+    ("ic_listeners_16", "users_xxxs"),
+    ("ui_kit_ic_circle_attention_outline_16", "info_xxs"),
+    ("ui_kit_ic_add_24", "add_xxs"),
+    ("ui_kit_ic_full_screen_24", "fullscreen_xs"),
+    ("ic_arrow_right_small", "arrowRight_xxs"),
+    ("ui_kit_ic_done_24", "check_xs"),
+    ("ic_tracklyrics_24", "lyrics_xxs"),
+    ("ic_trailer_24", "trailer_xs"),
+    ("ui_kit_ic_play_24", "play_xs"),
+    ("ic_chart_crown_20", "crown_xxs"),
+    ("ic_book_24", "note_xs"),
+    ("ui_kit_ic_kids_24", "kids_m"),
+    ("ic_podcast_24", "podcasts_xxs"),
+    ("ic_clip_24", "clip_xxs"),
+    ("ic_playlist_24", "playlist_xs"),
+    ("ic_album_24", "album_xs"),
+    ("ui_kit_ic_open_new_24", "link_xxs"),
+];
+
+fn load_icons(mut icon: impl FnMut(&str) -> Option<slint::Image>) -> Icons {
+    let mut icon = |name: &str| icon(name).unwrap_or_default();
     Icons {
         logo: icon("ic_yandex_music_logo_ru"),
         search: icon("ic_search_24"),

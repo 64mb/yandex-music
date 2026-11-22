@@ -314,6 +314,7 @@ export component QualityOption inherits Rectangle {
 
 // Цвета светлой и тёмной темы, сняты с мобильного клиента.
 export global T {
+    in property <string> display-font: "YS Display";
     in property <bool> dark;
     out property <color> bg: root.dark ? #000 : #fff;
     out property <color> fg: root.dark ? #fff : #000;
