@@ -126,7 +126,7 @@ fn java_string(env: &mut JNIEnv, obj: JObject) -> jni::errors::Result<String> {
 }
 
 /// Вызов Java из любого потока. Исключение Java гасится и превращается в None.
-fn with_env<T>(f: impl FnOnce(&mut JNIEnv, &JObject) -> jni::errors::Result<T>) -> Option<T> {
+pub(crate) fn with_env<T>(f: impl FnOnce(&mut JNIEnv, &JObject) -> jni::errors::Result<T>) -> Option<T> {
     let app = APP.get()?;
     // SAFETY: указатели на JavaVM и активити живут, пока жив процесс приложения.
     let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;

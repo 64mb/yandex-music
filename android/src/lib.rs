@@ -46,6 +46,7 @@ mod update;
 
 mod blob;
 mod home;
+mod media;
 mod mood;
 mod now;
 mod original;
@@ -80,6 +81,11 @@ struct SleepTimer {
 
 #[no_mangle]
 fn android_main(app: slint::android::AndroidApp) {
+    // Slint ставит платформу раз на процесс: второе окно в живом процессе останется чёрным.
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::process::exit(0);
+    }
     sys::init(&app);
     if let Err(e) = slint::android::init(app) {
         log(format!("slint: {e}"));
@@ -113,6 +119,7 @@ fn run() -> Result<(), slint::PlatformError> {
 
     let weak = ui.as_weak();
     let player = Player::spawn(std::sync::Arc::new(move || {
+        media::changed();
         let weak = weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak.upgrade() {
@@ -123,6 +130,7 @@ fn run() -> Result<(), slint::PlatformError> {
 
     // Громкость на телефоне задают кнопки системы, своего ползунка у оригинала нет.
     player.send(Cmd::Volume(1.0));
+    media::start(player.clone());
     profile::bind(&ui, &player);
     {
         let (weak, p) = (ui.as_weak(), player.clone());

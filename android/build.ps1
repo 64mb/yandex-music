@@ -57,13 +57,29 @@ Copy-Item "$target\$triple\$buildProfile\libyamusic.so" "$stage\lib\$Abi\"
 Copy-Item "$llvm\sysroot\usr\lib\$triple\libc++_shared.so" "$stage\lib\$Abi\"
 
 $unsigned = "$out\unsigned.apk"
-& "$bt\aapt2.exe" link -o $unsigned --debug-mode --manifest "$here\AndroidManifest.xml" -I "$platform\android.jar"
+$gen = "$out\gen"
+$classes = "$out\classes"
+Remove-Item $gen, $classes, "$out\res", "$out\java" -Recurse -Force -ErrorAction SilentlyContinue
+# aapt2 и javac не открывают файлы с кириллицей в пути.
+Copy-Item "$here\res" "$out\res" -Recurse
+Copy-Item "$here\java" "$out\java" -Recurse
+& "$bt\aapt2.exe" compile --dir "$out\res" -o "$out\res.zip"
+if ($LASTEXITCODE -ne 0) { throw 'aapt2 compile упал' }
+& "$bt\aapt2.exe" link -o $unsigned --debug-mode --manifest "$here\AndroidManifest.xml" -I "$platform\android.jar" --java $gen "$out\res.zip"
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 link упал' }
+
+# Java нужен только сервису шторки: у NativeActivity своего кода нет.
+$sources = Get-ChildItem "$out\java", $gen -Recurse -Filter *.java | ForEach-Object FullName
+& "$env:JAVA_HOME\bin\javac.exe" --release 11 -nowarn -encoding UTF-8 -classpath "$platform\android.jar" -d $classes @sources
+if ($LASTEXITCODE -ne 0) { throw 'javac упал' }
+$classFiles = Get-ChildItem $classes -Recurse -Filter *.class | ForEach-Object FullName
+& "$bt\d8.bat" --release --min-api 26 --lib "$platform\android.jar" --output $stage @classFiles
+if ($LASTEXITCODE -ne 0) { throw 'd8 упал' }
 
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($unsigned, 'Update')
 try {
-    Get-ChildItem "$stage\lib" -Recurse -File | ForEach-Object {
+    Get-ChildItem $stage -Recurse -File | ForEach-Object {
         $name = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $name) | Out-Null
     }
