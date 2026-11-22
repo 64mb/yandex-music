@@ -1,4 +1,4 @@
-//! Фон «Моей волны»: шейдер официального приложения рисуется под интерфейсом Slint.
+//! Фон «Моей волны»: шейдер рисуется под интерфейсом Slint неподвижной картинкой.
 //! Картинка размытая, поэтому считается в текстуре втрое меньше экрана и растягивается:
 //! пикселей в 9 раз меньше, а на глаз разницы нет. Оригинал считает каждый пиксель экрана.
 
@@ -41,6 +41,10 @@ struct Tween {
 impl Tween {
     fn new(v: f32) -> Tween {
         Tween { from: v, to: v, start: Instant::now(), ms: 1.0 }
+    }
+
+    fn done(&self, now: Instant) -> bool {
+        now.duration_since(self.start).as_secs_f32() * 1000.0 >= self.ms
     }
 
     fn go(&mut self, to: f32, ms: f32, now: Instant) {
@@ -93,17 +97,15 @@ pub struct Wave {
     vao: Option<glow::VertexArray>,
     target: Option<Target>,
     u: Uniforms,
-    last: Instant,
-    /// Время шейдера. Оригинал начинает его со случайной точки, чтобы волна не повторялась.
+    /// Время шейдера стоит на месте: картинка неподвижна и не тратит CPU. Случайная точка
+    /// даёт каждому запуску свой рисунок.
     time: f32,
-    speed: Tween,
     alpha: Tween,
     blobs: Tween,
     from: Palette,
     to: Palette,
     mix: Tween,
     mood: Option<Mood>,
-    playing: bool,
 }
 
 /// Состояние GL, которое Skia держит у себя в кэше: после волны его надо вернуть как было.
@@ -173,33 +175,34 @@ impl Wave {
             vao,
             target: None,
             u,
-            last: now,
             time: random_start(),
-            speed: Tween::new(mood::speed(None, false)),
             alpha,
             blobs,
             from: palette,
             to: palette,
             mix: Tween::new(1.0),
             mood: None,
-            playing: false,
         })
     }
 
-    /// Трек или пауза сменились: цвета и скорость плавно переходят к новым.
-    pub fn set_scene(&mut self, mood: Option<Mood>, playing: bool) {
+    /// Сменился трек: цвета плавно переходят к новым. Вернёт true, если надо перерисовать.
+    pub fn set_mood(&mut self, mood: Option<Mood>) -> bool {
+        if mood == self.mood {
+            return false;
+        }
         let now = Instant::now();
-        if mood != self.mood {
-            self.from = self.palette(now);
-            self.to = mood::palette(mood);
-            self.mix = Tween::new(0.0);
-            self.mix.go(1.0, TRANSITION_MS, now);
-        }
-        if mood != self.mood || playing != self.playing {
-            self.speed.go(mood::speed(mood, playing), TRANSITION_MS, now);
-        }
+        self.from = self.palette(now);
+        self.to = mood::palette(mood);
+        self.mix = Tween::new(0.0);
+        self.mix.go(1.0, TRANSITION_MS, now);
         self.mood = mood;
-        self.playing = playing;
+        true
+    }
+
+    /// Идёт ли переход: только тогда нужны новые кадры.
+    pub fn animating(&self) -> bool {
+        let now = Instant::now();
+        ![&self.mix, &self.alpha, &self.blobs].iter().all(|t| t.done(now))
     }
 
     fn palette(&self, now: Instant) -> Palette {
@@ -222,9 +225,6 @@ impl Wave {
             return;
         }
         let now = Instant::now();
-        let dt = now.duration_since(self.last).as_secs_f32().min(0.1);
-        self.last = now;
-        self.time += dt * self.speed.get(now);
 
         let saved = self.save();
         let gl = &self.gl;

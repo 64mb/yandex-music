@@ -99,7 +99,8 @@ pub fn toast(text: impl Into<String>) {
 }
 
 thread_local! {
-    static IMAGES: Images = Images::new(false);
+    // Бюджет обложек как у «Лёгкого» режима десктопа: экран телефона меньше.
+    static IMAGES: Images = Images::new(true);
 }
 
 /// Таймер сна: пауза в назначенное время или когда доиграет трек `after_track`.
@@ -117,12 +118,27 @@ fn android_main(app: slint::android::AndroidApp) {
         std::process::exit(0);
     }
     sys::init(&app);
-    if let Err(e) = slint::android::init(app) {
+    if let Err(e) = slint::android::init_with_event_listener(app, on_lifecycle) {
         log(format!("slint: {e}"));
         return;
     }
     if let Err(e) = run() {
         log(format!("окно: {e}"));
+    }
+}
+
+/// Приложение скрыто или системе не хватает памяти: обложки скачаются заново, когда понадобятся,
+/// а освобождённое аллокатор сразу отдаёт системе.
+fn on_lifecycle(event: &slint::android::android_activity::PollEvent<'_>) {
+    use slint::android::android_activity::{MainEvent, PollEvent};
+    if let PollEvent::Main(MainEvent::Stop | MainEvent::LowMemory) = event {
+        IMAGES.with(|i| i.clear());
+        // M_PURGE_ALL у scudo, Android 12+. На старых версиях вызов просто ничего не делает.
+        const M_PURGE_ALL: i32 = -104;
+        unsafe extern "C" {
+            fn mallopt(param: i32, value: i32) -> i32;
+        }
+        unsafe { mallopt(M_PURGE_ALL, 0) };
     }
 }
 
@@ -485,8 +501,8 @@ fn sync(ui: &App, player: &Player, wave: &Rc<RefCell<Option<wave_gl::Wave>>>, qu
         set_queue(ui, &s.upcoming);
         *queue.borrow_mut() = ids;
     }
-    if let Some(w) = wave.borrow_mut().as_mut() {
-        w.set_scene(s.track.as_ref().and_then(|t| t.mood), s.playing);
+    if wave.borrow_mut().as_mut().is_some_and(|w| w.set_mood(s.track.as_ref().and_then(|t| t.mood))) {
+        ui.window().request_redraw();
     }
 }
 
@@ -706,7 +722,9 @@ fn install_wave(ui: &App, fragment: String, wave: Rc<RefCell<Option<wave_gl::Wav
             if let Some(w) = wave.borrow_mut().as_mut() {
                 let size = ui.window().size();
                 unsafe { w.draw(size.width, size.height) };
-                ui.window().request_redraw();
+                if w.animating() {
+                    ui.window().request_redraw();
+                }
             }
         }
         slint::RenderingState::RenderingTeardown => *wave.borrow_mut() = None,

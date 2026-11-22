@@ -33,14 +33,6 @@ pub fn palette(mood: Option<Mood>) -> Palette {
     [c[5], c[3], c[1], c[4], c[2], c[0]]
 }
 
-/// Скорость времени шейдера: на паузе волна почти замирает.
-pub fn speed(mood: Option<Mood>, playing: bool) -> f32 {
-    if !playing {
-        return 0.2;
-    }
-    (mood.map_or(0.5, |m| m.energy) + 1.0) * 0.5
-}
-
 /// Оттенки не уходят в пурпур дальше 280°, если основной оттенок не лежит там сам.
 fn keep_range(hue: f32, base: f32) -> f32 {
     if (280.0..=359.0).contains(&base) {

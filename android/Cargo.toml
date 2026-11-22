@@ -33,7 +33,7 @@ glow = "0.16"
 slint-build = "~1.18"
 
 [profile.release]
-opt-level = 3
+opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
