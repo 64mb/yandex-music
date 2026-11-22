@@ -277,6 +277,39 @@ export component PickSheet inherits Sheet {
     }
 }
 
+export component ArtistsSheet inherits Sheet {
+    open <=> Pages.artists-open;
+    panel-height: 112px + Pages.artist-names.length * 56px;
+    Text {
+        x: 16px;
+        y: 30px;
+        text: "Исполнители";
+        color: T.fg;
+        font-size: 22px;
+        font-weight: 700;
+    }
+    for name[i] in Pages.artist-names: Rectangle {
+        y: 76px + i * 56px;
+        height: 56px;
+        Text {
+            x: 16px;
+            width: parent.width - 32px;
+            text: name;
+            color: T.fg;
+            font-size: 17px;
+            font-weight: 500;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        TouchArea {
+            clicked => {
+                root.open = false;
+                Pages.pick-artist(i);
+            }
+        }
+    }
+}
+
 export component MenuSheet inherits Sheet {
     callback lyrics();
     callback playlists();

@@ -88,6 +88,10 @@ export global Pages {
     // 0 волна по треку, 1 лайк, 2 следующим, 3 в очередь, 4 поделиться, 6 альбом, 7 исполнитель, 8 дизлайк.
     callback menu-action(int);
     callback pick(int);
+
+    in-out property <bool> artists-open;
+    in property <[string]> artist-names;
+    callback pick-artist(int);
 }
 
 // Номера видов блоков, те же в pages.rs.
@@ -530,7 +534,7 @@ component ListHead inherits Rectangle {
     }
     HorizontalLayout {
         y: 326px;
-        height: 84px;
+        height: 100px;
         alignment: center;
         spacing: 24px;
         RoundButton {
@@ -544,7 +548,7 @@ component ListHead inherits Rectangle {
         RoundButton {
             icon: root.icons.play;
             fill: #ff0;
-            tint: T.fg;
+            tint: #000;
             label-color: T.fg.with-alpha(0.50);
             label: "Слушать";
             clicked => { root.action(2); }
@@ -731,7 +735,7 @@ component BlockView inherits Rectangle {
         : root.kind == K.tiles ? root.pairs * 92px
         : root.kind == K.suggest ? 72px
         : root.kind == K.artist-head ? root.width * 1.39
-        : root.kind == K.list-head ? 410px
+        : root.kind == K.list-head ? 436px
         : root.kind == K.play ? 88px
         : root.kind == K.banners ? (root.width - 48px) * 0.6 + 64px
         : root.kind == K.grid ? root.pairs * (root.cell + 64px)

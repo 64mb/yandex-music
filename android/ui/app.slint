@@ -3,7 +3,7 @@
 
 import { Icons, WheelCard, Row, ArtistCard, Now, Cover, T } from "common.slint";
 import { Player } from "player.slint";
-import { MenuSheet, QualitySheet, TimerSheet, TrackSheet, PickSheet } from "sheets.slint";
+import { MenuSheet, QualitySheet, TimerSheet, TrackSheet, PickSheet, ArtistsSheet } from "sheets.slint";
 import { Prof, ProfileScreens, AboutPage, LogoutSheet } from "profile.slint";
 import { Pages, PageView, MiniPlayer, PCard, PRow, PBlock, PPage } from "pages.slint";
 
@@ -81,9 +81,41 @@ component LoginScreen inherits Rectangle {
                 font-weight: 500;
             }
             open-ta := TouchArea {
-                clicked => { root.open-login(); }
+                clicked => {
+                    root.copy-code();
+                    root.open-login();
+                }
             }
         }
+        if root.code != "": Rectangle {
+            height: 56px;
+            border-radius: 28px;
+            background: copy-ta.pressed ? #ffffff33 : #ffffff1a;
+            Text {
+                text: root.copied ? "Код скопирован" : "Скопировать код";
+                color: #fff;
+                font-size: 17px;
+                font-weight: 500;
+            }
+            copy-ta := TouchArea {
+                clicked => { root.copy-code(); }
+            }
+        }
+    }
+    // У Slint нет функции «положить в буфер», а у поля ввода есть copy().
+    clip := TextInput {
+        visible: false;
+        read-only: true;
+        text: root.code;
+    }
+    property <bool> copied;
+    function copy-code() {
+        if root.code == "" {
+            return;
+        }
+        clip.select-all();
+        clip.copy();
+        root.copied = true;
     }
 }
 
@@ -553,6 +585,10 @@ export component App inherits Window {
         height: root.height;
     }
     PickSheet {
+        width: root.width;
+        height: root.height;
+    }
+    ArtistsSheet {
         width: root.width;
         height: root.height;
     }

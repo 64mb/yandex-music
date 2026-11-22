@@ -86,6 +86,7 @@ struct Block {
     title: String,
     subtitle: String,
     more: Option<Key>,
+    artists: Vec<api::Named>,
     cards: Vec<LCard>,
     tabs: Vec<(String, Vec<LCard>)>,
     chip: usize,
@@ -226,6 +227,31 @@ pub fn start(ui: &App, api: Arc<Api>, player: Player) {
     p.on_menu(|b, i| menu(b as usize, i as usize));
     p.on_menu_action(menu_action);
     p.on_pick(|i| pick(i as usize));
+    p.on_pick_artist(|i| {
+        if let Some(id) = ARTIST_IDS.with(|ids| ids.borrow().get(i as usize).cloned()) {
+            open(&format!("artist:{id}"));
+        }
+    });
+}
+
+thread_local! {
+    static ARTIST_IDS: RefCell<Vec<String>> = RefCell::default();
+}
+
+/// Одного исполнителя открывает сразу, из нескольких даёт выбрать в шторке.
+pub fn open_artists(artists: &[api::Named]) {
+    match artists {
+        [] => {}
+        [one] => open(&format!("artist:{}", one.id)),
+        many => {
+            let Some(ui) = crate::UI.get().and_then(|w| w.upgrade()) else { return };
+            ARTIST_IDS.with(|ids| *ids.borrow_mut() = many.iter().map(|a| a.id.clone()).collect());
+            let names: Vec<SharedString> = many.iter().map(|a| a.name.as_str().into()).collect();
+            let pages = ui.global::<Pages>();
+            pages.set_artist_names(ModelRc::new(VecModel::from(names)));
+            pages.set_artists_open(true);
+        }
+    }
 }
 
 fn tab(t: i32) {
@@ -551,11 +577,7 @@ fn menu_action(n: i32) {
                 open(&format!("album:{a}"));
             }
         }
-        7 => {
-            if let Some(a) = t.artist_list.first() {
-                open(&format!("artist:{}", a.id));
-            }
-        }
+        7 => open_artists(&t.artist_list),
         8 => {
             let uid = now::uid();
             std::thread::spawn(move || {
@@ -634,6 +656,7 @@ fn action(b: usize, n: i32) {
                     });
                 }
             }
+            (5, Entity::Album(_)) if block.artists.len() > 1 => open_artists(&block.artists),
             (5, _) => {
                 if let Some(key) = block.more.clone() {
                     s.open(key);
@@ -665,6 +688,12 @@ fn action(b: usize, n: i32) {
             }
             (2, _) => {
                 let tracks: Vec<Track> = d.visible().iter().find(|b| matches!(b.kind, TRACKS | NUMBERED)).map(|b| b.tracks.clone()).unwrap_or_default();
+                // Уже играет трек с этой страницы: кнопка ставит на паузу и снимает с неё.
+                let current = s.player.state().track.map(|t| t.id);
+                if current.is_some_and(|id| tracks.iter().any(|t| t.id == id)) {
+                    s.player.send(Cmd::PlayPause);
+                    return;
+                }
                 let (kind, id, title) = s.list_source();
                 s.play(tracks, 0, kind, id, title);
             }
@@ -931,12 +960,13 @@ fn landing_block(kind: &str, title: &str, more: bool, uri: &str, b: LBlock) -> B
         "DONATIONS" | "EDITORIAL_ARTISTS" => Block::cards(ARTISTS, title, b.cards),
         "EDITORIAL_PROMOTIONS" => Block::cards(BANNERS, title, b.cards),
         "SPECIAL" => match b.banner {
-            Some(bn) => Block::cards(
+            // Платное промо с пометкой «Реклама» не показываем.
+            Some(bn) if !bn.ad => Block::cards(
                 BANNERS,
                 title,
                 vec![LCard { title: bn.title, subtitle: bn.subtitle, covers: bn.image.into_iter().collect(), target: format!("url:{}", bn.url), ..Default::default() }],
             ),
-            None => Block::default(),
+            _ => Block::default(),
         },
         "MIXES" | "MIXES_MUSIC" | "MIXES_GRID" => Block::cards(MIXES, if title.is_empty() { "Подборки музыки" } else { title }, b.cards),
         "CLIPS" | "EDITORIAL_CLIPS" | "DYNAMIC_BANNER" | "STATIC_DIV" | "NON_MUSIC_BANNER" | "KIDS_EASY_LOGIN_PROMO" => Block::default(),
@@ -1077,6 +1107,7 @@ fn fetch(api: &Api, uid: &str, key: &Key) -> Result<PageData, String> {
                 bg,
                 cards: vec![avatar],
                 more: a.artist_list.first().map(|ar| Key::Artist(ar.id.clone())),
+                artists: a.artist_list.clone(),
                 ..Block::new(ALBUM_HEAD, &a.title)
             };
             let pos = (1..=tracks.len()).map(|n| n.to_string()).collect();

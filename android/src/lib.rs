@@ -345,8 +345,11 @@ fn bind_player(ui: &App, player: &Player, sleep: &Rc<RefCell<SleepTimer>>) {
         });
     });
     now.on_like_artist(|i| now::toggle_artist_like(i as usize));
-    now.on_open_artist(|i| {
-        if let Some(id) = now::artist_id(i) {
+    let p = player.clone();
+    now.on_open_artist(move |i| {
+        if i < 0 {
+            pages::open_artists(&p.state().track.map(|t| t.artist_list).unwrap_or_default());
+        } else if let Some(id) = now::artist_id(i) {
             pages::open(&format!("artist:{id}"));
         }
     });
