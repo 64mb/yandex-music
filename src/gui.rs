@@ -1294,6 +1294,21 @@ fn load_assets() -> Option<Sprite> {
     Sprite::load(&mut src)
 }
 
+/// Сеть до music.yandex.ru бывает медленной, и при запуске шрифты с иконками не успевают
+/// скачаться. Тогда пробуем ещё раз в 20 с и подставляем их без перезапуска (#48).
+fn retry_assets(ui: &AppWindow) {
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_secs(20));
+            let Some(sprite) = load_assets() else { continue };
+            log("шрифты и иконки догрузились");
+            let _ = weak.upgrade_in_event_loop(move |ui| set_icons(&ui, &sprite));
+            return;
+        }
+    });
+}
+
 thread_local! {
     /// Найденный новый релиз — для кнопки «Обновить».
     static UPDATE: RefCell<Option<crate::update::Release>> = const { RefCell::new(None) };
@@ -1523,15 +1538,16 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     };
     let assets = load_assets();
     if assets.is_none() {
-        log("шрифты и иконки недоступны — нет ни оригинала, ни сети");
+        log("шрифты и иконки недоступны — нет ни оригинала, ни сети, пробуем ещё в фоне");
     }
 
     let ui = AppWindow::new()?;
     ui.global::<Theme>().set_dark(true);
     let lite = cfg.mode == "lite";
     apply_mode(&ui, lite);
-    if let Some(sprite) = &assets {
-        set_icons(&ui, sprite);
+    match &assets {
+        Some(sprite) => set_icons(&ui, sprite),
+        None => retry_assets(&ui),
     }
     load_id_icons(&ui);
     crate::update::ENABLED.store(cfg.check_updates, Ordering::Relaxed);
