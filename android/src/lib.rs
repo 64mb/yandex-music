@@ -19,9 +19,18 @@ mod config;
 #[path = "../../src/eq.rs"]
 #[allow(dead_code)]
 mod eq;
+#[path = "../../src/history.rs"]
+#[allow(dead_code)]
+mod history;
 #[path = "../../src/images.rs"]
 #[allow(dead_code)]
 mod images;
+#[path = "../../src/landing.rs"]
+#[allow(dead_code)]
+mod landing;
+#[path = "../../src/net.rs"]
+#[allow(dead_code)]
+mod net;
 #[path = "../../src/palette.rs"]
 mod palette;
 #[path = "../../src/player.rs"]
@@ -35,19 +44,35 @@ mod stream;
 mod blob;
 mod home;
 mod mood;
+mod now;
 mod original;
+mod pages;
 mod sys;
 mod vector;
 mod wave_gl;
 
+use api::{Api, Track};
 use config::{log, Config};
-use player::{Cmd, Player, Source, Status};
-use slint::ComponentHandle;
+use images::Images;
+use player::{After, Cmd, ListKind, Player, Repeat, Source, Status};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 slint::include_modules!();
+
+thread_local! {
+    static IMAGES: Images = Images::new(false);
+}
+
+/// Таймер сна: пауза в назначенное время или когда доиграет трек `after_track`.
+#[derive(Default)]
+struct SleepTimer {
+    at: Option<Instant>,
+    after_track: Option<String>,
+}
 
 #[no_mangle]
 fn android_main(app: slint::android::AndroidApp) {
@@ -69,7 +94,9 @@ fn run() -> Result<(), slint::PlatformError> {
     }
     let shader = apk.as_mut().and_then(|a| {
         original::register_fonts(a);
-        ui.set_icons(load_icons(a));
+        let icons = load_icons(a);
+        ui.set_icons(icons.clone());
+        ui.global::<Now>().set_icons(icons);
         original::wave_shader(a)
     });
     drop(apk);
@@ -91,26 +118,18 @@ fn run() -> Result<(), slint::PlatformError> {
 
     // Громкость на телефоне задают кнопки системы, своего ползунка у оригинала нет.
     player.send(Cmd::Volume(1.0));
-    if let Some(token) = Config::load().token {
-        home::start(&ui, &token);
+    let cfg = Config::load();
+    api::QUALITY.store(cfg.quality, std::sync::atomic::Ordering::Relaxed);
+    ui.global::<Now>().set_quality(quality_index(cfg.quality));
+    if let Some(token) = cfg.token {
+        logged_in(&ui, &token, &player);
         player.send(Cmd::Login(token));
-        ui.set_logged_in(true);
     } else {
         start_login(&ui, player.clone());
     }
 
-    {
-        let p = player.clone();
-        ui.on_play_pause(move || p.send(Cmd::PlayPause));
-    }
-    {
-        let p = player.clone();
-        ui.on_like(move || {
-            if let Some(t) = p.state().track {
-                p.send(Cmd::LikeTrack(t));
-            }
-        });
-    }
+    let sleep: Rc<RefCell<SleepTimer>> = Default::default();
+    bind_player(&ui, &player, &sleep);
     {
         let p = player.clone();
         ui.on_play_wheel(move |i| {
@@ -139,29 +158,233 @@ fn run() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         let player = player.clone();
         let wave = wave.clone();
+        let queue: Rc<RefCell<Vec<String>>> = Default::default();
         move || {
             if let Some(ui) = weak.upgrade() {
-                sync(&ui, &player, &wave);
+                sync(&ui, &player, &wave, &queue);
+                tick_sleep(&ui, &player, &sleep);
             }
         }
     };
     ui.on_refresh(refresh.clone());
     let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, Duration::from_millis(250), refresh);
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(200), refresh);
 
     ui.run()
 }
 
-/// Состояние плеера → свойства окна и сцена волны.
-fn sync(ui: &App, player: &Player, wave: &Rc<RefCell<Option<wave_gl::Wave>>>) {
+fn logged_in(ui: &App, token: &str, player: &Player) {
+    let api = Arc::new(Api::new(token));
+    let images = IMAGES.with(|i| i.clone());
+    home::start(ui, api.clone(), images.clone());
+    pages::start(ui, api.clone(), player.clone());
+    now::start(ui, api, images);
+    ui.set_logged_in(true);
+}
+
+/// Кнопки плеера, шторок и плашки волны.
+fn bind_player(ui: &App, player: &Player, sleep: &Rc<RefCell<SleepTimer>>) {
+    let now = ui.global::<Now>();
+    let p = player.clone();
+    now.on_play_pause(move || p.send(Cmd::PlayPause));
+    let p = player.clone();
+    now.on_next(move || p.send(Cmd::Next));
+    let p = player.clone();
+    now.on_prev(move || p.send(Cmd::Prev));
+    let p = player.clone();
+    now.on_like(move || {
+        if let Some(t) = p.state().track {
+            p.send(Cmd::LikeTrack(t));
+        }
+    });
+    let p = player.clone();
+    now.on_dislike(move || p.send(Cmd::Dislike));
+    let p = player.clone();
+    now.on_seek(move |f| {
+        let s = p.state();
+        if s.duration > 0.0 {
+            p.send(Cmd::Seek(f * s.duration));
+        }
+    });
+    let p = player.clone();
+    now.on_toggle_repeat(move || {
+        let next = match p.state().repeat {
+            Repeat::Off => Repeat::All,
+            Repeat::All => Repeat::One,
+            Repeat::One => Repeat::Off,
+        };
+        p.send(Cmd::Repeat(next));
+    });
+    let p = player.clone();
+    now.on_track_wave(move || {
+        let Some(t) = p.state().track else { return };
+        p.send(Cmd::Wave(Source::Seed { station: format!("track:{}", t.id), header: "Моя волна по треку".into(), title: t.title }));
+        p.send(Cmd::Resume);
+    });
+    let p = player.clone();
+    now.on_share(move || {
+        if let Some(t) = p.state().track {
+            sys::share(&track_link(&t));
+        }
+    });
+    let p = player.clone();
+    now.on_trailer(move || {
+        let (Some(t), Some(api)) = (p.state().track, now::api()) else { return };
+        let Some(album) = t.album_id else { return };
+        let p = p.clone();
+        std::thread::spawn(move || match api.trailer(&format!("albums/{album}")) {
+            Ok((title, tracks)) => p.send(Cmd::PlayList {
+                source: Source::List { kind: ListKind::Album, id: album, title },
+                tracks,
+                start: 0,
+                after: After::Wave(Source::Wave),
+            }),
+            Err(e) => log(format!("трейлер: {e}")),
+        });
+    });
+    let p = player.clone();
+    now.on_play_similar(move |i| {
+        let tracks = now::similar();
+        if (i as usize) < tracks.len() {
+            p.send(Cmd::PlayList {
+                source: Source::List { kind: ListKind::Tracks, id: String::new(), title: "Похожие треки".into() },
+                tracks,
+                start: i as usize,
+                after: After::Wave(Source::Wave),
+            });
+        }
+    });
+    let p = player.clone();
+    now.on_add_to_playlist(move |i| {
+        let (Some(t), Some((uid, list)), Some(api)) = (p.state().track, now::playlist(i as usize), now::api()) else { return };
+        std::thread::spawn(move || match api.add_to_playlist(&uid, &list.kind, &[t]) {
+            Ok(()) => {
+                let _ = slint::invoke_from_event_loop(now::reload_playlists);
+            }
+            Err(e) => log(format!("добавить в плейлист: {e}")),
+        });
+    });
+    now.on_like_artist(|i| now::toggle_artist_like(i as usize));
+    now.on_open_artist(|i| {
+        if let Some(id) = now::artist_id(i) {
+            pages::open(&format!("artist:{id}"));
+        }
+    });
+    let p = player.clone();
+    now.on_open_album(move || {
+        if let Some(a) = p.state().track.and_then(|t| t.album_id) {
+            pages::open(&format!("album:{a}"));
+        }
+    });
+    now.on_open_playlists(|| pages::open("playlists"));
+    let p = player.clone();
+    now.on_back_to_wave(move || {
+        p.send(Cmd::Wave(Source::Wave));
+        p.send(Cmd::Resume);
+    });
+    let p = player.clone();
+    now.on_jump(move |i| p.send(Cmd::Jump(i as usize)));
+    let weak = ui.as_weak();
+    now.on_set_quality(move |i| {
+        let q = [3, 0, 1, 2][i.clamp(0, 3) as usize];
+        api::QUALITY.store(q, std::sync::atomic::Ordering::Relaxed);
+        let mut c = Config::load();
+        c.quality = q;
+        c.save();
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<Now>().set_quality(i);
+        }
+    });
+    let (s, p) = (sleep.clone(), player.clone());
+    now.on_start_timer(move |minutes, end_of_track| {
+        *s.borrow_mut() = if end_of_track {
+            SleepTimer { at: None, after_track: p.state().track.map(|t| t.id) }
+        } else {
+            SleepTimer { at: Some(Instant::now() + Duration::from_secs(minutes.max(1) as u64 * 60)), after_track: None }
+        };
+    });
+    let s = sleep.clone();
+    now.on_stop_timer(move || *s.borrow_mut() = SleepTimer::default());
+}
+
+/// Качество из настроек → пункт шторки. «Автоматическое» хранится как 3, на десктопе его нет.
+fn quality_index(q: u8) -> i32 {
+    match q {
+        3 => 0,
+        0 => 1,
+        1 => 2,
+        _ => 3,
+    }
+}
+
+pub(crate) fn track_link(t: &Track) -> String {
+    match &t.album_id {
+        Some(a) => format!("https://music.yandex.ru/album/{a}/track/{}", t.id),
+        None => format!("https://music.yandex.ru/track/{}", t.id),
+    }
+}
+
+fn tick_sleep(ui: &App, player: &Player, sleep: &Rc<RefCell<SleepTimer>>) {
+    let mut t = sleep.borrow_mut();
     let s = player.state();
-    home::track_changed(s.track.as_ref().map_or("", |t| t.id.as_str()));
-    let title = s.track.as_ref().map(|t| format!("{} — {}", t.artists, t.title)).unwrap_or_default();
-    ui.set_track_title(title.into());
-    ui.set_playing(s.playing);
-    ui.set_loading(s.loading);
-    ui.set_liked(s.track.as_ref().is_some_and(|t| player.is_liked(&t.id)));
-    ui.set_progress(if s.duration > 0.0 { s.position / s.duration } else { 0.0 });
+    let now = ui.global::<Now>();
+    let left = match (&t.at, &t.after_track) {
+        (Some(at), _) => at.saturating_duration_since(Instant::now()).as_secs_f32(),
+        (None, Some(id)) if s.track.as_ref().is_some_and(|t| &t.id == id) => (s.duration - s.position).max(0.1),
+        // Заиграл следующий трек: тот, на котором ставили таймер, доиграл.
+        (None, Some(_)) => 0.0,
+        (None, None) => {
+            now.set_timer_on(false);
+            return;
+        }
+    };
+    if left <= 0.0 {
+        if s.playing {
+            player.send(Cmd::PlayPause);
+        }
+        *t = SleepTimer::default();
+    }
+    now.set_timer_on(left > 0.0);
+    now.set_timer_left(now::time(left.ceil()).into());
+}
+
+/// Состояние плеера → свойства окна и сцена волны.
+fn sync(ui: &App, player: &Player, wave: &Rc<RefCell<Option<wave_gl::Wave>>>, queue: &Rc<RefCell<Vec<String>>>) {
+    let s = player.state();
+    now::set_uid(&s.uid);
+    now::track_changed(s.track.as_ref());
+    let now = ui.global::<Now>();
+    now.set_track_id(s.track.as_ref().map(|t| t.id.as_str()).unwrap_or("").into());
+    now.set_playing(s.playing);
+    now.set_loading(s.loading);
+    if s.playing {
+        ui.set_started(true);
+    }
+    now.set_liked(s.track.as_ref().is_some_and(|t| player.is_liked(&t.id)));
+    now.set_progress(if s.duration > 0.0 { s.position / s.duration } else { 0.0 });
+    now.set_position_text(now::time(s.position).into());
+    if s.duration > 0.0 {
+        now.set_duration_text(now::time(s.duration).into());
+    }
+    now.set_lyric(now::lyric_at(s.position));
+    now.set_repeat(match s.repeat {
+        Repeat::Off => 0,
+        Repeat::All => 1,
+        Repeat::One => 2,
+    });
+    let source = match &s.source {
+        Source::Wave => "Моя волна",
+        Source::Seed { header, .. } => header.as_str(),
+        Source::List { title, .. } => title.as_str(),
+    };
+    now.set_source(source.into());
+    let pill = match &s.source {
+        Source::Wave => "",
+        Source::Seed { title, .. } if !title.is_empty() => title.as_str(),
+        Source::Seed { header, .. } => header.as_str(),
+        Source::List { title, .. } => title.as_str(),
+    };
+    now.set_pill(pill.into());
     let status = match &s.status {
         Status::LoggedOut => "",
         Status::Connecting => "Подключаемся…",
@@ -170,10 +393,34 @@ fn sync(ui: &App, player: &Player, wave: &Rc<RefCell<Option<wave_gl::Wave>>>) {
         Status::Failed(e) => e.as_str(),
     };
     let status = s.error.as_ref().map(|(e, _)| e.as_str()).unwrap_or(status);
-    ui.set_status(status.into());
+    now.set_status(status.into());
+
+    let ids: Vec<String> = s.upcoming.iter().map(|t| t.id.clone()).collect();
+    if *queue.borrow() != ids {
+        set_queue(ui, &s.upcoming);
+        *queue.borrow_mut() = ids;
+    }
     if let Some(w) = wave.borrow_mut().as_mut() {
         w.set_scene(s.track.as_ref().and_then(|t| t.mood), s.playing);
     }
+}
+
+fn set_queue(ui: &App, tracks: &[Track]) {
+    let model = Rc::new(VecModel::from(tracks.iter().map(now::track_row).collect::<Vec<_>>()));
+    let px = (52.0 * ui.window().scale_factor()).round() as u32;
+    IMAGES.with(|images| {
+        for (i, t) in tracks.iter().enumerate() {
+            let Some(uri) = &t.cover else { continue };
+            let m = model.clone();
+            images.get(&api::pic(uri, px), px, move |img| {
+                if let Some(mut row) = m.row_data(i) {
+                    row.cover = img.clone();
+                    m.set_row_data(i, row);
+                }
+            });
+        }
+    });
+    ui.global::<Now>().set_queue(ModelRc::from(model));
 }
 
 /// Вход по коду: показать код, открыть ya.ru/device, ждать подтверждения в фоне.
@@ -211,10 +458,10 @@ fn start_login(ui: &App, player: Player) {
                     c.save();
                     player.send(Cmd::Login(token.access.clone()));
                     let weak = weak.clone();
+                    let player = player.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(ui) = weak.upgrade() {
-                            home::start(&ui, &token.access);
-                            ui.set_logged_in(true);
+                            logged_in(&ui, &token.access, &player);
                         }
                     });
                     return;
@@ -240,8 +487,33 @@ fn load_icons(apk: &mut original::Apk) -> Icons {
         tab_home: icon("ic_landing_default"),
         tab_concerts: icon("ic_android_concerts_light_theme_default"),
         tab_collection: icon("ic_android_my_music_test_default"),
-        sparkle: icon("wave_words_sparkle_base"),
-        sparkle_ai: icon("wave_words_sparkle_mini_ai"),
+        chevron_down: icon("ic_arrow_mid_down_24"),
+        queue: icon("ui_kit_ic_list_24"),
+        share: icon("ic_share_new_24"),
+        more: icon("ic_more_24"),
+        dislike: icon("ic_dislike_24"),
+        repeat: icon("ic_repeat_default_40"),
+        repeat_one: icon("ic_repeat_active_1_40"),
+        lyrics: icon("ic_lyrics_default_40"),
+        download: icon("ui_kit_ic_download_24"),
+        timer: icon("ic_timer_24"),
+        sound: icon("ui_kit_ic_filter_24"),
+        listeners: icon("ic_listeners_16"),
+        explicit: icon("ui_kit_ic_circle_attention_outline_16"),
+        add: icon("ui_kit_ic_add_24"),
+        fullscreen: icon("ui_kit_ic_full_screen_24"),
+        arrow_right: icon("ic_arrow_right_small"),
+        check: icon("ui_kit_ic_done_24"),
+        text: icon("ic_tracklyrics_24"),
+        trailer: icon("ic_trailer_24"),
+        play_small: icon("ui_kit_ic_play_24"),
+        chart: icon("ic_chart_crown_20"),
+        book: icon("ic_book_24"),
+        kids: icon("ui_kit_ic_kids_24"),
+        podcast: icon("ic_podcast_24"),
+        clip: icon("ic_clip_24"),
+        playlist: icon("ic_playlist_24"),
+        album: icon("ic_album_24"),
     }
 }
 

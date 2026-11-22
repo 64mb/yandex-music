@@ -1,32 +1,17 @@
 // Экран «Моей волны» как в официальном Android-клиенте. Размеры в dp сняты с оригинала
 // на экране 1080×2400 (420 dpi). Фон с волной рисует OpenGL под окном, поэтому окно прозрачное.
 
-export struct Icons {
-    logo: image,
-    search: image,
-    play: image,
-    pause: image,
-    like: image,
-    liked: image,
-    tab-wave: image,
-    tab-home: image,
-    tab-concerts: image,
-    tab-collection: image,
-    sparkle: image,
-    sparkle-ai: image,
-}
+import { Icons, WheelCard, Row, ArtistCard, Now, Cover } from "common.slint";
+import { Player } from "player.slint";
+import { MenuSheet, QualitySheet, TimerSheet, TrackSheet, PickSheet } from "sheets.slint";
+import { Pages, PageView, MiniPlayer, PCard, PRow, PBlock, PPage } from "pages.slint";
 
-export struct WheelCard {
-    name: string,
-    description: string,
-    cover: image,
-    round: bool,
-    blob: image,
-}
+export { Icons, WheelCard, Row, ArtistCard, Now, Pages, PCard, PRow, PBlock, PPage }
 
 component TabIcon inherits Rectangle {
     in property <image> icon;
     in property <color> tint;
+    callback clicked();
     width: 48px;
     height: 48px;
     Image {
@@ -34,6 +19,9 @@ component TabIcon inherits Rectangle {
         width: 24px;
         height: 24px;
         colorize: tint;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
     }
 }
 
@@ -106,20 +94,14 @@ export component App inherits Window {
     in property <bool> logged-in;
     in property <string> login-code;
     in property <string> login-hint;
-
-    in property <string> track-title;
-    in property <bool> playing;
-    in property <bool> loading;
-    in property <bool> liked;
-    in property <float> progress;
-    in property <string> status;
-    // Факт о текущем треке под плашкой.
-    in property <string> fact;
+    // Волну уже запускали: экран показывает исполнителя вместо большой кнопки Play.
+    in property <bool> started;
     in property <[WheelCard]> wheel;
     in-out property <length> wheel-offset;
 
-    callback play-pause();
-    callback like();
+    // 0 волна, 1 «Что послушать», 2 концерты, 3 коллекция.
+    in property <int> tab;
+    callback tab-clicked(int);
     callback play-wheel(int);
     callback open-login();
     callback retry-login();
@@ -143,8 +125,8 @@ export component App inherits Window {
         width: root.width;
         height: root.height;
 
-        // Шапка: логотип по центру и поиск справа.
-        Image {
+        // Шапка: логотип по центру и поиск справа. Когда волна играет, вместо логотипа надпись.
+        if !root.started: Image {
             source: root.icons.logo;
             x: (parent.width - self.width) / 2;
             y: 58px;
@@ -152,16 +134,72 @@ export component App inherits Window {
             height: 44px;
             colorize: #ff0;
         }
-        Image {
-            source: root.icons.search;
-            x: parent.width - 40px - self.width;
-            y: 68.5px;
-            width: 24px;
-            height: 24px;
-            colorize: #ffffffe6;
+        if root.started && Now.pill != "": Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: 60px;
+            height: 40px;
+            width: pill-row.preferred-width;
+            border-radius: 20px;
+            background: #ffffff1f;
+            pill-row := HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 6px;
+                spacing: 4px;
+                Text {
+                    text: Now.pill;
+                    color: #fff;
+                    font-size: 15px;
+                    font-weight: 500;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    max-width: 240px;
+                }
+                Rectangle {
+                    width: 32px;
+                    Path {
+                        width: 14px;
+                        height: 14px;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        stroke: #fff;
+                        stroke-width: 2px;
+                        commands: "M5 5l14 14 M19 5L5 19";
+                    }
+                    TouchArea {
+                        clicked => { Now.back-to-wave(); }
+                    }
+                }
+            }
+        }
+        if root.started && Now.pill == "": Text {
+            y: 58px;
+            width: parent.width;
+            height: 44px;
+            text: "Моя волна";
+            color: #ff0;
+            font-family: "YS Music Headline";
+            font-weight: 900;
+            font-size: 20px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            x: parent.width - 52px;
+            y: 56.5px;
+            width: 48px;
+            height: 48px;
+            Image {
+                source: root.icons.search;
+                width: 24px;
+                height: 24px;
+                colorize: #ffffffe6;
+            }
+            TouchArea {
+                clicked => { Pages.open-search(); }
+            }
         }
 
-        Text {
+        if !root.started: Text {
             text: "Моя волна";
             x: 0;
             y: 242px;
@@ -173,8 +211,8 @@ export component App inherits Window {
             color: #fff;
         }
 
-        // Большая кнопка Play.
-        play := Rectangle {
+        // Большая кнопка Play до первого запуска.
+        if !root.started: Rectangle {
             x: (parent.width - 96px) / 2;
             y: 342px;
             width: 96px;
@@ -182,97 +220,162 @@ export component App inherits Window {
             border-radius: 48px;
             background: play-ta.pressed ? #e6e600 : #ff0;
             Image {
-                source: root.playing ? root.icons.pause : root.icons.play;
+                source: Now.playing ? root.icons.pause : root.icons.play;
                 width: 41.6px;
                 height: 41.6px;
                 colorize: #000000e6;
             }
             play-ta := TouchArea {
-                clicked => { root.play-pause(); }
+                clicked => { Now.play-pause(); }
             }
         }
 
-        // Плашка трека с прогрессом и лайком.
+        // Во время игры: имя исполнителя, его фото без фона и маленькая обложка.
+        if root.started: Rectangle {
+            probe := Text {
+                visible: false;
+                text: Now.artist;
+                font-family: "YS Music Headline";
+                font-weight: 900;
+                font-size: 56px;
+            }
+            property <length> name-y: Now.cutout.width > 0 ? 120px : 262px;
+            TouchArea {
+                y: parent.name-y;
+                height: 64px;
+                clicked => { Now.open-artist(-1); }
+            }
+            Text {
+                y: parent.name-y;
+                width: parent.width;
+                height: 64px;
+                text: Now.artist;
+                color: #fff;
+                font-family: "YS Music Headline";
+                font-weight: 900;
+                font-size: 56px * min(1, (parent.width - 32px) / max(1px, probe.preferred-width));
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            Image {
+                x: 28px;
+                y: 130px;
+                width: parent.width - 56px;
+                height: self.width;
+                source: Now.cutout;
+                image-fit: contain;
+            }
+            if Now.cutout.width > 0: TouchArea {
+                x: 28px;
+                y: 130px;
+                width: parent.width - 56px;
+                height: self.width;
+                clicked => { Now.open-artist(-1); }
+            }
+            TouchArea {
+                x: (parent.width - 96px) / 2;
+                y: 342px;
+                width: 96px;
+                height: 96px;
+                Cover {
+                    source: Now.cover;
+                    radius: 9px;
+                }
+                clicked => { player.open = true; }
+            }
+        }
+
+        // Плашка трека. Во время игры слева кружок паузы, справа кружок лайка.
         Rectangle {
-            x: 32px;
+            x: root.started ? 92.2px : 32px;
             y: 450.3px;
-            width: parent.width - 64px;
+            width: parent.width - (root.started ? 184.4px : 64px);
             height: 56px;
             border-radius: 28px;
             clip: true;
             background: #ffffff14;
             Rectangle {
                 x: 0;
-                width: parent.width * clamp(root.progress, 0, 1);
+                width: parent.width * clamp(Now.progress, 0, 1);
                 height: parent.height;
                 background: #ffffff14;
             }
-            Text {
-                x: 56px;
-                width: parent.width - 112px;
-                text: root.track-title != "" ? root.track-title : root.status;
-                color: #ffffff99;
-                font-family: "YS Music Headline";
-                font-weight: 700;
-                font-size: 17px;
-                overflow: elide;
-                horizontal-alignment: center;
+            HorizontalLayout {
+                x: root.started ? 16px : 56px;
+                width: parent.width - 2 * self.x;
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: Now.title != "" ? Now.title : Now.status;
+                    color: #ffffff99;
+                    font-family: "YS Music Headline";
+                    font-weight: 700;
+                    font-size: 17px;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                if Now.explicit: Image {
+                    y: (56px - 16px) / 2;
+                    width: 16px;
+                    height: 16px;
+                    source: root.icons.explicit;
+                    colorize: #ffffff99;
+                }
             }
-            Rectangle {
+            TouchArea {
+                clicked => {
+                    if Now.has-track {
+                        player.open = true;
+                    }
+                }
+            }
+            if !root.started: Rectangle {
                 x: parent.width - 56px;
                 width: 56px;
                 height: 56px;
                 Image {
-                    source: root.liked ? root.icons.liked : root.icons.like;
+                    source: Now.liked ? root.icons.liked : root.icons.like;
                     width: 24px;
                     height: 24px;
-                    colorize: root.liked ? #ff0 : #ffffffcc;
+                    colorize: Now.liked ? #ff0 : #ffffffcc;
                 }
                 TouchArea {
-                    clicked => { root.like(); }
+                    clicked => { Now.like(); }
                 }
             }
         }
-
-        // Факт о треке: искра с подписью AI и текст до трёх строк.
-        if root.fact != "": Rectangle {
-            y: 534.5px;
-            width: parent.width;
-            height: 80px;
-            Rectangle {
-                x: 65px - self.width / 2;
-                y: 37.5px - self.height / 2;
-                width: 180px;
-                height: 180px;
-                background: @radial-gradient(circle, #ffffff1a 0%, #ffffff00 50%);
-            }
+        if root.started: Rectangle {
+            x: 32px;
+            y: 450.3px;
+            width: 56px;
+            height: 56px;
+            border-radius: 28px;
+            background: #ffffff14;
             Image {
-                source: root.icons.sparkle;
-                x: 35.5px;
-                y: 26px;
+                source: Now.playing ? root.icons.pause : root.icons.play;
                 width: 28px;
                 height: 28px;
+                colorize: #ffffffcc;
             }
+            TouchArea {
+                clicked => { Now.play-pause(); }
+            }
+        }
+        if root.started: Rectangle {
+            x: parent.width - 88px;
+            y: 450.3px;
+            width: 56px;
+            height: 56px;
+            border-radius: 28px;
+            background: #ffffff14;
             Image {
-                source: root.icons.sparkle-ai;
-                x: 35.5px;
-                y: 26px;
-                width: 28px;
-                height: 28px;
+                source: Now.liked ? root.icons.liked : root.icons.like;
+                width: 24px;
+                height: 24px;
+                colorize: Now.liked ? #ff0 : #ffffffcc;
             }
-            Text {
-                x: 79.6px;
-                y: 13px;
-                width: 269px;
-                height: 55px;
-                text: root.fact;
-                color: #ffffffe6;
-                font-size: 15px;
-                font-weight: 500;
-                wrap: word-wrap;
-                overflow: elide;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            TouchArea {
+                clicked => { Now.like(); }
             }
         }
 
@@ -358,17 +461,127 @@ export component App inherits Window {
             }
         }
 
-        // Нижние вкладки.
+    }
+
+    if root.logged-in && Pages.shown: PageView {
+        width: root.width;
+        height: root.height;
+        icons: root.icons;
+        bottom: Now.has-track ? 176px : 100px;
+    }
+
+    if root.logged-in && Pages.shown && Now.has-track && !Pages.viewer-open: MiniPlayer {
+        x: 12px;
+        y: root.height - 75.8px - 8px - self.height;
+        width: root.width - 24px;
+        icons: root.icons;
+        open => { player.open = true; }
+    }
+
+    // Нижние вкладки: на волне тёмные, на страницах белые.
+    if root.logged-in && !Pages.viewer-open: Rectangle {
+        y: root.height - 83.8px;
+        height: 83.8px;
+        background: Pages.shown ? #fff : transparent;
         HorizontalLayout {
-            y: parent.height - 75.8px;
+            y: 8px;
             height: 48px;
             padding-left: 27.8px;
             padding-right: 27.8px;
             alignment: space-between;
-            TabIcon { icon: root.icons.tab-wave; tint: #ff0; }
-            TabIcon { icon: root.icons.tab-home; tint: #ffffff80; }
-            TabIcon { icon: root.icons.tab-concerts; tint: #ffffff80; }
-            TabIcon { icon: root.icons.tab-collection; tint: #ffffff80; }
+            TabIcon {
+                icon: root.icons.tab-wave;
+                tint: root.tab == 0 ? (Pages.shown ? #000 : #ff0) : (Pages.shown ? #00000066 : #ffffff80);
+                clicked => { root.tab-clicked(0); }
+            }
+            TabIcon {
+                icon: root.icons.tab-home;
+                tint: root.tab == 1 ? #000 : (Pages.shown ? #00000066 : #ffffff80);
+                clicked => { root.tab-clicked(1); }
+            }
+            TabIcon {
+                icon: root.icons.tab-concerts;
+                tint: root.tab == 2 ? #000 : (Pages.shown ? #00000066 : #ffffff80);
+                clicked => { root.tab-clicked(2); }
+            }
+            TabIcon {
+                icon: root.icons.tab-collection;
+                tint: root.tab == 3 ? #000 : (Pages.shown ? #00000066 : #ffffff80);
+                clicked => { root.tab-clicked(3); }
+            }
         }
+    }
+
+    player := Player {
+        width: root.width;
+        height: root.height;
+        open-menu => { menu.open = true; }
+        open-timer => { timer.open = true; }
+        open-quality => { quality.open = true; }
+    }
+    menu := MenuSheet {
+        width: root.width;
+        height: root.height;
+        lyrics => {
+            Now.lyrics-mode = true;
+            player.lyrics-full = true;
+        }
+        playlists => { player.show-playlists(); }
+    }
+    TrackSheet {
+        width: root.width;
+        height: root.height;
+    }
+    PickSheet {
+        width: root.width;
+        height: root.height;
+    }
+    quality := QualitySheet {
+        width: root.width;
+        height: root.height;
+    }
+    timer := TimerSheet {
+        width: root.width;
+        height: root.height;
+    }
+
+    // «Назад» закрывает то, что открыто сверху; если ничего, Android сворачивает приложение.
+    back := FocusScope {
+        width: 0;
+        height: 0;
+        key-pressed(e) => {
+            if e.text != Key.Back {
+                return reject;
+            }
+            if Pages.pick-open {
+                Pages.pick-open = false;
+            } else if Pages.menu-open {
+                Pages.menu-open = false;
+            } else if Pages.viewer-open {
+                Pages.viewer-open = false;
+            } else if menu.open {
+                menu.open = false;
+            } else if quality.open {
+                quality.open = false;
+            } else if timer.open {
+                timer.open = false;
+            } else if player.lyrics-full {
+                player.lyrics-full = false;
+            } else if player.queue-open {
+                player.queue-open = false;
+            } else if player.open {
+                player.open = false;
+            } else if Pages.shown {
+                Pages.back();
+            } else {
+                return reject;
+            }
+            accept
+        }
+    }
+    forward-focus: back;
+
+    public function refocus() {
+        back.focus();
     }
 }

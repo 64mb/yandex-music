@@ -60,6 +60,37 @@ pub fn open_url(url: &str) {
     }
 }
 
+/// Отдать ссылку системному «Поделиться».
+pub fn share(text: &str) {
+    let ok = with_env(|env, activity| {
+        let action = env.new_string("android.intent.action.SEND")?;
+        let intent = env.new_object("android/content/Intent", "(Ljava/lang/String;)V", &[JValue::Object(&action)])?;
+        let mime = env.new_string("text/plain")?;
+        env.call_method(&intent, "setType", "(Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&mime)])?;
+        let key = env.new_string("android.intent.extra.TEXT")?;
+        let value = env.new_string(text)?;
+        env.call_method(
+            &intent,
+            "putExtra",
+            "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;",
+            &[JValue::Object(&key), JValue::Object(&value)],
+        )?;
+        let chooser = env
+            .call_static_method(
+                "android/content/Intent",
+                "createChooser",
+                "(Landroid/content/Intent;Ljava/lang/CharSequence;)Landroid/content/Intent;",
+                &[JValue::Object(&intent), JValue::Object(&JObject::null())],
+            )?
+            .l()?;
+        env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&chooser)])?;
+        Ok(())
+    });
+    if ok.is_none() {
+        crate::config::log("не удалось открыть «Поделиться»");
+    }
+}
+
 /// Путь к APK установленного приложения. Без `<queries>` в манифесте Android 11+ его не покажет.
 pub fn package_path(package: &str) -> Option<PathBuf> {
     with_env(|env, activity| {

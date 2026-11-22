@@ -35,6 +35,9 @@ pub struct Named {
     pub id: String,
     pub name: String,
     pub cover: Option<String>,
+    /// Фото без фона: телефон ставит его над названием трека в «Моей волне».
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub cutout: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +132,8 @@ pub struct Playlist {
     pub likes: u64,
     /// Логин владельца — им адресуется плейлист в коде для вставки.
     pub login: String,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub track_count: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -276,6 +281,7 @@ fn artists_of(v: &Value) -> Vec<Named> {
                         id: s(x.get("id")).unwrap_or_default(),
                         name: x.get("name")?.as_str()?.to_string(),
                         cover: x.pointer("/cover/uri").and_then(|u| u.as_str()).map(String::from),
+                        cutout: x.pointer("/cutoutCover/uri").and_then(|u| u.as_str()).map(String::from),
                     })
                 })
                 .collect()
@@ -422,6 +428,7 @@ pub(crate) fn parse_playlist(v: &Value) -> Option<Playlist> {
         color: hex_color(v.pointer("/derivedColors/average")),
         likes: v.get("likesCount").and_then(|c| c.as_u64()).unwrap_or(0),
         login: owner.map(|o| str_of(o, "login")).unwrap_or_default(),
+        track_count: v.get("trackCount").and_then(|c| c.as_u64()).unwrap_or(0),
     })
 }
 
@@ -998,8 +1005,18 @@ impl Api {
     }
 
     /// Блоки лендингов отвечают так же, как официальному приложению для Windows.
+    #[cfg(not(target_os = "android"))]
     pub fn get_raw(&self, path: &str) -> Res<Value> {
         self.send_raw(self.desktop_req(Method::GET, path))
+    }
+
+    /// На телефоне блоки как у мобильного клиента: сервер собирает страницы по его версии.
+    #[cfg(target_os = "android")]
+    pub fn get_raw(&self, path: &str) -> Res<Value> {
+        let rb = self
+            .req_as(Method::GET, path, crate::client::ANDROID_APP_CLIENT)
+            .header("X-Yandex-Music-Device", crate::client::mobile_device_header());
+        self.send_raw(rb)
     }
 
     pub fn post_raw(&self, path: &str, body: &Value) -> Res<Value> {
@@ -1236,12 +1253,19 @@ impl Api {
             .unwrap_or_default())
     }
 
-    /// Факт о треке от нейросети, как строка с искрой под плеером волны в телефоне.
+    /// Похожие треки, как в блоке под плеером телефона.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-    pub fn track_fact(&self, track_id: &str) -> Res<Option<String>> {
-        let body = json!({ "trackIds": [track_id], "viewedCards": [], "viewedBigCards": [] });
-        let v = self.send(self.req(Method::POST, "/words/cards").json(&body))?;
-        Ok(v.pointer("/0/cards/0/card/text").and_then(|t| t.as_str()).map(String::from))
+    pub fn similar_tracks(&self, track_id: &str) -> Res<Vec<Track>> {
+        let v = self.get(&format!("/tracks/{track_id}/similar"), &[])?;
+        Ok(v.get("similarTracks").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(parse_track).collect()).unwrap_or_default())
+    }
+
+    /// Исполнитель и сколько человек слушали его за месяц.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub fn artist_brief(&self, id: &str) -> Res<(Artist, Option<u64>)> {
+        let info = self.get_raw(&format!("/artists/{id}/brief-info"))?;
+        let a = info.get("artist").and_then(parse_artist).ok_or("нет данных об исполнителе")?;
+        Ok((a, info.pointer("/stats/lastMonthListeners").and_then(|x| x.as_u64())))
     }
 
     pub fn pins(&self) -> Res<Vec<Pin>> {

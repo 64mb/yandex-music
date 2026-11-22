@@ -1,5 +1,4 @@
-//! Под плашкой трека на экране волны: факт о треке и колесо волн. Данные качаются в фоне,
-//! состояние живёт в UI-потоке.
+//! Колесо волн под плашкой трека. Данные качаются в фоне, состояние живёт в UI-потоке.
 
 use crate::api::{self, Api, WheelItem};
 use crate::blob::{self, Blobs};
@@ -13,12 +12,9 @@ use std::sync::Arc;
 
 struct Home {
     ui: slint::Weak<App>,
-    api: Arc<Api>,
     images: Images,
     blobs: Blobs,
     wheel: Vec<WheelItem>,
-    /// Трек, для которого показан или качается факт.
-    fact_track: String,
 }
 
 thread_local! {
@@ -29,13 +25,10 @@ fn with_home<R>(f: impl FnOnce(&mut Home) -> R) -> Option<R> {
     HOME.with(|h| h.borrow_mut().as_mut().map(f))
 }
 
-/// Вошли в аккаунт: завести API и загрузить колесо.
-pub fn start(ui: &App, token: &str) {
-    let api = Arc::new(Api::new(token));
+/// Вошли в аккаунт: загрузить колесо.
+pub fn start(ui: &App, api: Arc<Api>, images: Images) {
     HOME.with(|h| {
-        let mut h = h.borrow_mut();
-        let images = h.take().map_or_else(|| Images::new(false), |old| old.images);
-        *h = Some(Home { ui: ui.as_weak(), api: api.clone(), images, blobs: Blobs::default(), wheel: Vec::new(), fact_track: String::new() });
+        *h.borrow_mut() = Some(Home { ui: ui.as_weak(), images, blobs: Blobs::default(), wheel: Vec::new() });
     });
     std::thread::spawn(move || {
         let wheel = api.wheel();
@@ -51,37 +44,6 @@ pub fn start(ui: &App, token: &str) {
 /// Карточка колеса по номеру.
 pub fn wheel_item(i: usize) -> Option<WheelItem> {
     with_home(|h| h.wheel.get(i).cloned()).flatten()
-}
-
-/// Заиграл другой трек: убрать старый факт и спросить новый.
-pub fn track_changed(id: &str) {
-    with_home(|h| {
-        if h.fact_track == id {
-            return;
-        }
-        h.fact_track = id.to_string();
-        if let Some(ui) = h.ui.upgrade() {
-            ui.set_fact("".into());
-        }
-        if id.is_empty() {
-            return;
-        }
-        let (api, id) = (h.api.clone(), id.to_string());
-        std::thread::spawn(move || {
-            let fact = api.track_fact(&id);
-            let _ = slint::invoke_from_event_loop(move || {
-                with_home(|h| match fact {
-                    Ok(Some(text)) if h.fact_track == id => {
-                        if let Some(ui) = h.ui.upgrade() {
-                            ui.set_fact(text.into());
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(e) => log(format!("факт о треке: {e}")),
-                });
-            });
-        });
-    });
 }
 
 impl Home {
