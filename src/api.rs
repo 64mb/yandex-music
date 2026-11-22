@@ -1112,6 +1112,11 @@ impl Api {
         let tracks = self.get_raw(&format!("/artists/{id}/tracks")).unwrap_or_default();
         let fam = self.get_raw(&format!("/artists/{id}/familiar-you/info?withWaveInfo=true&withCollectionInfo=true")).unwrap_or_default();
         let block = |b: &str| cards(&self.get_raw(&format!("/artists/{id}/blocks/{b}")).unwrap_or_default());
+        // Сервер отдаёт альбомы вперемешку, у оригинала новые идут первыми (#52).
+        let by_year = |mut v: Vec<Card>| {
+            v.sort_by_key(|c| std::cmp::Reverse(c.year.get(..4).and_then(|y| y.parse::<u32>().ok()).unwrap_or(0)));
+            v
+        };
         Ok(ArtistFull {
             id: a.id.clone(),
             name: a.name.clone(),
@@ -1122,8 +1127,8 @@ impl Api {
             familiar_tracks: fam.pointer("/collection/trackCount").and_then(|x| x.as_u64()).unwrap_or(0)
                 + fam.pointer("/wave/trackCount").and_then(|x| x.as_u64()).unwrap_or(0),
             familiar_albums: fam.pointer("/collection/albumCount").and_then(|x| x.as_u64()).unwrap_or(0),
-            studio: block("artist-studio-albums"),
-            albums: block("artist-albums"),
+            studio: by_year(block("artist-studio-albums")),
+            albums: by_year(block("artist-albums")),
             playlists: block("artist-playlists"),
             compilations: block("artist-compilations"),
             similar: block("similar-artists"),
