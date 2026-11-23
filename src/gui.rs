@@ -1639,6 +1639,8 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     if let Some(t) = cfg.token.clone() {
         player.send(Cmd::Login(t));
     }
+    #[cfg(target_os = "macos")]
+    let _play_url_handler = crate::mac_window::handle_play_url(&player);
 
     let tracks = Rc::new(VecModel::<TrackItem>::default());
     let app = ui.global::<App>();

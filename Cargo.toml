@@ -26,7 +26,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSButton", "NSButtonCell", "NSControl", "NSImage", "NSLayoutConstraint", "NSResponder", "NSTitlebarAccessoryViewController", "NSView", "NSViewController", "NSWindow", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["block2", "NSDictionary", "NSNotification", "NSOperation", "NSValue", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["block2", "NSAppleEventDescriptor", "NSAppleEventManager", "NSDictionary", "NSNotification", "NSOperation", "NSValue", "NSString", "objc2-core-services"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["block2", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
 
 [target.'cfg(windows)'.dependencies.windows-sys]

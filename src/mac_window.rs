@@ -1,10 +1,10 @@
-use crate::player::Player;
+use crate::player::{Cmd, Player};
 use block2::RcBlock;
 use objc2::{
     define_class, msg_send,
     rc::Retained,
     runtime::ProtocolObject,
-    runtime::{AnyObject, NSObjectProtocol},
+    runtime::{AnyObject, NSObject, NSObjectProtocol},
     sel, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
@@ -12,7 +12,10 @@ use objc2_app_kit::{
     NSImage, NSImageNameExitFullScreenTemplate, NSLayoutAttribute,
     NSTitlebarAccessoryViewController, NSView,
 };
-use objc2_foundation::{NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{
+    NSAppleEventDescriptor, NSAppleEventManager, NSNotificationCenter, NSPoint, NSRect, NSSize,
+    NSString,
+};
 use slint::winit_030::{
     winit::raw_window_handle::{HasWindowHandle, RawWindowHandle},
     WinitWindowAccessor,
@@ -134,4 +137,44 @@ impl Drop for TerminationObserver {
         let token: &ProtocolObject<dyn NSObjectProtocol> = &self.token;
         unsafe { self.center.removeObserver(token.as_ref()) };
     }
+}
+
+const GET_URL: u32 = u32::from_be_bytes(*b"GURL");
+const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
+const PLAY_URL: &str = "yamusic-rs://media-play";
+
+define_class!(
+    #[unsafe(super = NSObject)]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = Player]
+    pub struct PlayUrlHandler;
+
+    impl PlayUrlHandler {
+        #[unsafe(method(handlePlayUrl:withReplyEvent:))]
+        fn handle_url(&self, event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
+            let url = event
+                .paramDescriptorForKeyword(DIRECT_OBJECT)
+                .and_then(|object| object.stringValue());
+            if url.as_deref().is_some_and(|url| url == &*NSString::from_str(PLAY_URL)) {
+                crate::config::log("media: play requested through the macOS URL handler");
+                self.ivars().send(Cmd::Resume);
+            }
+        }
+    }
+);
+
+pub fn handle_play_url(player: &Player) -> Retained<PlayUrlHandler> {
+    let mtm = MainThreadMarker::new().expect("the player runs on the main thread");
+    let handler = PlayUrlHandler::alloc(mtm).set_ivars(player.clone());
+    let handler: Retained<PlayUrlHandler> = unsafe { msg_send![super(handler), init] };
+    unsafe {
+        NSAppleEventManager::sharedAppleEventManager()
+            .setEventHandler_andSelector_forEventClass_andEventID(
+                &handler,
+                sel!(handlePlayUrl:withReplyEvent:),
+                GET_URL,
+                GET_URL,
+            );
+    }
+    handler
 }
