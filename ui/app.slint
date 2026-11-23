@@ -73,8 +73,8 @@ export component AppWindow inherits Window {
     title: App.app-name;
     no-frame: !App.macos;
     always-on-top: App.mini;
-    preferred-width: 1280px;
-    preferred-height: 800px;
+    preferred-width: App.mini ? 400px : 1280px;
+    preferred-height: App.mini ? 88px : 800px;
     min-width: App.mini ? 320px : 960px;
     min-height: App.mini ? 88px : 640px;
     default-font-family: "YS Text";

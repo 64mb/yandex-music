@@ -1318,12 +1318,52 @@ fn keep_on_screen(w: &slint::Window) {
 
 /// Показать окно: при запуске в трей оно ещё не создано, после закрытия в трей — спрятано.
 fn reveal(ui: &AppWindow) {
+    #[cfg(target_os = "macos")]
+    if ui.global::<App>().get_mini() && !ui.window().is_visible() {
+        let weak = ui.as_weak();
+        if slint::spawn_local(async move {
+            let Some(ui) = weak.upgrade() else { return };
+            let window = match ui.window().winit_window().await {
+                Ok(window) => window,
+                Err(e) => {
+                    log(format!("окно не создано: {e}"));
+                    return;
+                }
+            };
+            if ui.window().is_visible() {
+                sys::raise(ui.window());
+                return;
+            }
+            window.set_min_inner_size(Some(winit::dpi::LogicalSize::new(320.0, 88.0)));
+            ui.window().set_size(slint::LogicalSize::new(400.0, 88.0));
+            prepare_reveal(&ui);
+            // let the destination screen update the scale before the first draw
+            Timer::single_shot(Duration::ZERO, move || {
+                let Some(ui) = weak.upgrade() else { return };
+                if !ui.window().is_visible() {
+                    apply_ui_scale(&ui);
+                    if !show_window(&ui) {
+                        return;
+                    }
+                }
+                sys::raise(ui.window());
+            });
+        }).is_ok() {
+            return;
+        }
+    }
     let first = !sys::created(ui.window());
+    if show_window(ui) {
+        finish_reveal(ui.as_weak(), first, 0);
+    }
+}
+
+fn show_window(ui: &AppWindow) -> bool {
     if let Err(e) = ui.show() {
         log(format!("окно не показалось: {e}"));
-        return;
+        return false;
     }
-    finish_reveal(ui.as_weak(), first, 0);
+    true
 }
 
 /// Режим работы: анимации в интерфейсе и размер кэша глифов Skia.
@@ -1346,30 +1386,34 @@ fn finish_reveal(weak: slint::Weak<AppWindow>, first: bool, tries: u32) {
     }
     if first {
         apply_ui_scale(&ui);
-        sys::prepare(ui.window());
-        #[cfg(target_os = "macos")]
-        {
-            let weak = ui.as_weak();
-            crate::mac_window::install_mini_player_button(ui.window(), move || {
-                if let Some(ui) = weak.upgrade() {
-                    ui.global::<App>().invoke_toggle_mini();
-                }
-            });
-        }
-        #[cfg(target_os = "macos")]
-        if ui.global::<App>().get_mini() {
-            with_ctx(|c| {
-                let state = c.st.borrow();
-                let legacy = state.cfg.mini_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y));
-                crate::mac_window::restore_mini_placement(ui.window(), state.cfg.mini_placement, legacy);
-            });
-        } else {
-            keep_on_screen(ui.window());
-        }
-        #[cfg(not(target_os = "macos"))]
-        keep_on_screen(ui.window());
+        prepare_reveal(&ui);
     }
     sys::raise(ui.window());
+}
+
+fn prepare_reveal(ui: &AppWindow) {
+    sys::prepare(ui.window());
+    #[cfg(target_os = "macos")]
+    {
+        let weak = ui.as_weak();
+        crate::mac_window::install_mini_player_button(ui.window(), move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<App>().invoke_toggle_mini();
+            }
+        });
+    }
+    #[cfg(target_os = "macos")]
+    if ui.global::<App>().get_mini() {
+        with_ctx(|c| {
+            let state = c.st.borrow();
+            let legacy = state.cfg.mini_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y));
+            crate::mac_window::restore_mini_placement(ui.window(), state.cfg.mini_placement, legacy);
+        });
+    } else {
+        keep_on_screen(ui.window());
+    }
+    #[cfg(not(target_os = "macos"))]
+    keep_on_screen(ui.window());
 }
 
 fn notifier() -> Arc<dyn Fn() + Send + Sync> {
