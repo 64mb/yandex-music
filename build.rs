@@ -3,7 +3,11 @@
 const APP_NAME: &str = "Яндекс Музыка RS";
 
 fn main() {
-    println!("cargo:rustc-env=APP_NAME={APP_NAME}");
+    let app_name = match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("macos") => "Yandex Music",
+        _ => APP_NAME,
+    };
+    println!("cargo:rustc-env=APP_NAME={app_name}");
     slint_build::compile_with_config(
         "ui/app.slint",
         slint_build::CompilerConfiguration::new().with_style("fluent".into()),
