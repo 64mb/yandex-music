@@ -102,6 +102,8 @@ pub enum Cmd {
     PlayPause,
     /// Снять с паузы (если уже играет — ничего не делать).
     Resume,
+    #[cfg(target_os = "macos")]
+    Pause,
     Next,
     Prev,
     Seek(f32),
@@ -1048,6 +1050,17 @@ impl Engine {
         }
     }
 
+    fn pause(&mut self) {
+        self.paused = true;
+        if let Some(listen) = &mut self.listen {
+            listen.stop();
+            listen.pause = true;
+        }
+        if let Some(sink) = self.sink() {
+            sink.pause();
+        }
+    }
+
     fn cmd(&mut self, c: Cmd) {
         match c {
             Cmd::Login(token) => {
@@ -1081,14 +1094,9 @@ impl Engine {
             }
             Cmd::Resume => self.resume(),
             Cmd::PlayPause if self.paused => self.resume(),
-            Cmd::PlayPause => {
-                self.paused = true;
-                if let Some(l) = &mut self.listen {
-                    l.stop();
-                    l.pause = true;
-                }
-                if let Some(sink) = self.sink() { sink.pause(); }
-            }
+            Cmd::PlayPause => self.pause(),
+            #[cfg(target_os = "macos")]
+            Cmd::Pause => self.pause(),
             Cmd::Next => {
                 self.errors_in_row = 0;
                 if self.current.is_some() {

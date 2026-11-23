@@ -17,6 +17,10 @@ mod history;
 mod i18n;
 mod images;
 mod landing;
+#[cfg(target_os = "macos")]
+mod mac_media;
+#[cfg(target_os = "macos")]
+mod mac_window;
 #[cfg(target_os = "linux")]
 mod mpris;
 mod net;

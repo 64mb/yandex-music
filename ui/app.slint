@@ -252,15 +252,15 @@ export component AppWindow inherits Window {
         double-clicked => { App.toggle-maximize(); }
     }
 
-    HorizontalLayout {
+    if !App.macos: HorizontalLayout {
         x: parent.width - self.width;
-        width: App.macos ? 46px : 4 * 46px;
+        width: 4 * 46px;
         y: 0;
         height: 32px;
         CaptionButton { kind: 3; clicked => { App.toggle-mini(); } }
-        if !App.macos: CaptionButton { kind: 0; clicked => { App.minimize(); } }
-        if !App.macos: CaptionButton { kind: 1; maximized: App.maximized; clicked => { App.toggle-maximize(); } }
-        if !App.macos: CaptionButton { kind: 2; clicked => { App.close(); } }
+        CaptionButton { kind: 0; clicked => { App.minimize(); } }
+        CaptionButton { kind: 1; maximized: App.maximized; clicked => { App.toggle-maximize(); } }
+        CaptionButton { kind: 2; clicked => { App.close(); } }
     }
 
     if !App.macos && !App.maximized: ResizeEdge { dir: 0; x: 8px; y: 0; width: parent.width - 16px - 4 * 46px; height: 4px; }

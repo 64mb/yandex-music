@@ -229,6 +229,8 @@ impl Ctx {
         }
 
         let started = self.st.borrow().started;
+        #[cfg(target_os = "macos")]
+        crate::mac_media::sync(started.then_some(s.track.as_ref()).flatten(), &s);
         app.set_has_track(started && s.track.is_some());
         app.set_playing(s.playing);
         app.set_likes_revision(s.likes_revision);
@@ -1320,6 +1322,15 @@ fn finish_reveal(weak: slint::Weak<AppWindow>, first: bool, tries: u32) {
     if first {
         apply_ui_scale(&ui);
         sys::prepare(ui.window());
+        #[cfg(target_os = "macos")]
+        {
+            let weak = ui.as_weak();
+            crate::mac_window::install_mini_player_button(ui.window(), move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.global::<App>().invoke_toggle_mini();
+                }
+            });
+        }
         keep_on_screen(ui.window());
     }
     sys::raise(ui.window());
@@ -1614,6 +1625,8 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
 
     crate::api::ALLOW_EXPLICIT.store(cfg.allow_explicit, Ordering::Relaxed);
     let player = Player::spawn(notifier());
+    #[cfg(target_os = "macos")]
+    crate::mac_media::install(&player);
     player.send(Cmd::Volume(cfg.volume));
     if cfg.log_volume {
         player.send(Cmd::Loudness(Loudness::Decibels));
@@ -2120,7 +2133,10 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     if !start_hidden {
         reveal(&ui);
     }
-    slint::run_event_loop_until_quit()?;
+    let result = slint::run_event_loop_until_quit();
+    #[cfg(target_os = "macos")]
+    crate::mac_media::uninstall();
+    result?;
     save_places(&ui, &places);
     sys::cleanup();
     // Фоновые потоки (аудио, сеть, обложки) не ждём: иначе процесс может остаться
