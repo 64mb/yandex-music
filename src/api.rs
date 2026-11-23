@@ -164,6 +164,8 @@ pub struct WheelItem {
     pub description: String,
     pub cover: Option<String>,
     pub round: bool,
+    #[cfg_attr(target_os = "android", allow(dead_code))]
+    pub control_accent: bool,
     pub seeds: Vec<String>,
     /// Цвет обложки: по его оттенку телефонный клиент красит подложку карточки.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -1256,6 +1258,7 @@ impl Api {
                             description: str_of(it, "description"),
                             cover: d.pointer("/agent/cover/uri").and_then(|u| u.as_str()).map(String::from),
                             round: d.pointer("/agent/entity/type").and_then(|t| t.as_str()) == Some("artist"),
+                            control_accent: it.get("style").and_then(Value::as_str) == Some("CONTROL_ACCENT"),
                             color: hex_color(d.pointer("/agent/cover/color")),
                             seeds: d
                                 .pointer("/wave/seeds")

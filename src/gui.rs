@@ -1085,7 +1085,13 @@ impl Ctx {
         let model = Rc::new(VecModel::from(
             items
                 .iter()
-                .map(|w| WheelEntry { name: w.name.clone().into(), description: w.description.clone().into(), cover: Image::default(), round: w.round })
+                .map(|w| WheelEntry {
+                    name: w.name.clone().into(),
+                    description: w.description.clone().into(),
+                    cover: Image::default(),
+                    round: w.round,
+                    control_accent: w.control_accent,
+                })
                 .collect::<Vec<_>>(),
         ));
         self.ui().global::<App>().set_wheel(ModelRc::from(model.clone()));
@@ -1776,6 +1782,12 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
 
     app.on_navigate(|page| with_ctx(|c| c.navigate(page, None, true)));
     app.on_open_pin(|i| with_ctx(|c| c.open_pin(i as usize)));
+    app.on_open_pin_menu(|i, x, y| with_ctx(|c| {
+        if let Some(pin) = c.st.borrow().pins.get(i as usize) {
+            let item = c.menu_entry(&format!("unpin:{}", pin.target), "Открепить", c.ui().global::<Icons>().get_m_unpin(), false);
+            c.show_menu(vec![item], x, y, true);
+        }
+    }));
     app.on_open_likes(|| with_ctx(|c| c.navigate(Page::List, Some("likes".into()), true)));
     app.on_open_playlist(|i| {
         with_ctx(|c| {
@@ -2994,9 +3006,10 @@ impl Ctx {
         let pin = !self.is_pinned(&target);
         let ui = self.ui();
         let app = ui.global::<App>();
-        if target.starts_with("artist:") {
+        if self.current_artist().is_some_and(|(id, _)| target.strip_prefix("artist:") == Some(id.as_str())) {
             app.set_ar_pinned(pin);
-        } else {
+        }
+        if self.list_target().as_deref() == Some(target.as_str()) {
             app.set_pinned(pin);
         }
         std::thread::spawn(move || {
@@ -3214,6 +3227,10 @@ impl Ctx {
     }
 
     fn menu_action(self: &Rc<Self>, id: &str) {
+        if let Some(target) = id.strip_prefix("unpin:") {
+            if self.is_pinned(target) { self.toggle_pin(target.to_owned()); }
+            return;
+        }
         if let Some(rest) = id.strip_prefix("artist-") {
             let Some((aid, name)) = self.current_artist() else { return };
             match rest {

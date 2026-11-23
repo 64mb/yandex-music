@@ -133,6 +133,7 @@ export struct WheelEntry {
     description: string,
     cover: image,
     round: bool,
+    control-accent: bool,
 }
 
 // trend: 0 — корона (первое место), 1 — без изменений, 2 — вверх, 3 — вниз, 4 — новый.
@@ -185,6 +186,7 @@ export global App {
     in property <string> version;
     in property <string> app-name;
     in property <[WheelEntry]> wheel;
+    in-out property <float> wheel-offset;
     in property <bool> pinned;
 
     // Аккаунт
@@ -490,6 +492,7 @@ export global App {
     callback artist-like-track(int);
     callback artist-familiar();
     callback open-pin(int);
+    callback open-pin-menu(int, length, length);
     callback open-likes();
     callback open-playlist(int);
     callback open-album(int);
