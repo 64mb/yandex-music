@@ -4,12 +4,12 @@
 export enum Page { wave, search, trends, concerts, nonmusic, collection, list, artist, artists, settings, grid, chart, history }
 
 export struct TrackItem {
+    id: string,
     title: string,
     version: string,
     artists: string,
     duration: string,
     cover: image,
-    liked: bool,
     explicit: bool,
     available: bool,
     artist-names: [string],
@@ -205,6 +205,8 @@ export global App {
     in property <float> position;
     in property <float> duration;
     in property <bool> liked;
+    in property <int> likes-revision;
+    pure callback track-liked(string, int) -> bool;
     in property <int> repeat;
     in property <bool> shuffle;
     in property <float> volume: 0.6;

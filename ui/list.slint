@@ -399,12 +399,14 @@ export component ListPage inherits Rectangle {
 
         for k in max(0, shown-rows): Rectangle {
             property <int> idx: flick.first + k;
+            property <string> track-id: App.tracks[idx].id;
             x: row-x;
             y: rows-y + idx * row-h;
             width: parent.width - row-x - 33px;
             height: row-h;
             init => { App.request-cover(idx); }
             changed idx => { App.request-cover(idx); }
+            changed track-id => { App.request-cover(idx); }
             if !album: TrackRow {
                 width: parent.width;
                 item: App.tracks[idx];

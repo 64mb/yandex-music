@@ -7,7 +7,7 @@ use crate::config::log;
 use crate::eq::{Eq, EqParams};
 use crate::stream::{Buf, Reader};
 use rodio::{Decoder, OutputStream, Sink, Source as _};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -76,6 +76,7 @@ pub struct Shared {
     pub source: Source,
     pub upcoming: Vec<Track>,
     pub playing: bool,
+    pub likes_revision: i32,
     pub loading: bool,
     pub position: f32,
     track_generation: u64,
@@ -106,7 +107,7 @@ pub enum Cmd {
     Seek(f32),
     Volume(f32),
     Loudness(Loudness),
-    LikeTrack(Track),
+    LikeTrack(Track, Option<LikeCompleted>),
     Dislike,
     Wave(Source),
     PlayList { source: Source, tracks: Vec<Track>, start: usize, after: After },
@@ -124,7 +125,8 @@ enum Msg {
     Cmd(Cmd),
     Seek { seconds: f32, track_generation: u64, request: u64 },
     Account(Res<Account>),
-    Likes(Res<Vec<String>>),
+    Likes(String, Res<Vec<String>>),
+    LikeFinished { uid: String, id: String, liked: bool, result: Res<()> },
     Batch { res: Res<Batch>, replace: bool, gen: u64 },
     Audio { gen: u64, res: Res<Audio> },
     Prefetch { id: String, res: Res<Audio> },
@@ -132,6 +134,7 @@ enum Msg {
 }
 
 type Notify = Arc<dyn Fn() + Send + Sync>;
+type LikeCompleted = Box<dyn FnOnce(&Track, bool, &Res<()>) + Send>;
 type Job = Box<dyn FnOnce() + Send>;
 pub type Likes = Arc<Mutex<HashSet<String>>>;
 
@@ -371,6 +374,8 @@ struct Engine {
     bg: Sender<Job>,
     shared: Arc<Mutex<Shared>>,
     likes: Likes,
+    // Запоминаем и снятые лайки, иначе старый список с сервера может их вернуть.
+    like_writes: HashMap<String, LikeWrite>,
     notify: Notify,
     eq: Arc<EqParams>,
     audio: Option<(OutputStream, Sink)>,
@@ -424,6 +429,11 @@ struct Engine {
     handled_seek: u64,
 }
 
+struct LikeWrite {
+    pending: usize,
+    saved: bool,
+}
+
 impl Engine {
     fn new(tx: Sender<Msg>, shared: Arc<Mutex<Shared>>, likes: Likes, notify: Notify, eq: Arc<EqParams>) -> Self {
         // Фидбек и лайки — по порядку в отдельном потоке, чтобы не блокировать плеер.
@@ -441,6 +451,7 @@ impl Engine {
             bg,
             shared,
             likes,
+            like_writes: HashMap::new(),
             notify,
             eq,
             audio: None,
@@ -966,7 +977,8 @@ impl Engine {
                         let tx = self.tx.clone();
                         let uid = acc.uid;
                         thread::spawn(move || {
-                            let _ = tx.send(Msg::Likes(api.liked_ids(&uid)));
+                            let ids = api.liked_ids(&uid);
+                            let _ = tx.send(Msg::Likes(uid, ids));
                         });
                     }
                 }
@@ -976,10 +988,25 @@ impl Engine {
                     self.sh().status = Status::Failed(e);
                 }
             },
-            Msg::Likes(res) => match res {
-                Ok(ids) => self.likes.lock().unwrap().extend(ids),
+            Msg::Likes(uid, _) if uid != self.uid => {}
+            Msg::Likes(_, res) => match res {
+                Ok(ids) => self.merge_liked_ids(ids),
                 Err(e) => log(format!("likes: {e}")),
             },
+            Msg::LikeFinished { uid, id, liked, result } => {
+                if uid != self.uid { return; }
+                if let Some(write) = self.like_writes.get_mut(&id).filter(|w| w.pending > 0) {
+                    if result.is_ok() { write.saved = liked; }
+                    write.pending -= 1;
+                    if write.pending == 0 {
+                        let mut likes = self.likes.lock().unwrap();
+                        let changed = if write.saved { likes.insert(id) } else { likes.remove(&id) };
+                        drop(likes);
+                        if changed { self.likes_changed(); }
+                    }
+                }
+                if let Err(e) = result { self.error(format!("Лайк не сохранился: {e}")); }
+            }
             Msg::Batch { res, replace, gen } => {
                 if gen != self.batch_gen {
                     return;
@@ -1025,6 +1052,9 @@ impl Engine {
         match c {
             Cmd::Login(token) => {
                 self.reset();
+                self.like_writes.clear();
+                self.likes.lock().unwrap().clear();
+                self.likes_changed();
                 let api = Api::new(&token);
                 self.api = Some(api.clone());
                 {
@@ -1042,6 +1072,8 @@ impl Engine {
                 self.api = None;
                 self.uid.clear();
                 self.likes.lock().unwrap().clear();
+                self.like_writes.clear();
+                self.likes_changed();
                 let mut s = self.sh();
                 s.status = Status::LoggedOut;
                 s.login.clear();
@@ -1090,7 +1122,7 @@ impl Engine {
                     s.set_volume(self.gain());
                 }
             }
-            Cmd::LikeTrack(t) => self.toggle_like(t),
+            Cmd::LikeTrack(t, saved) => self.toggle_like(t, saved),
             Cmd::Dislike => {
                 if let (Some(api), Some(t)) = (self.api.clone(), self.current.as_ref()) {
                     let id = t.full_id();
@@ -1178,7 +1210,21 @@ impl Engine {
         }
     }
 
-    fn toggle_like(&mut self, t: Track) {
+    fn likes_changed(&self) {
+        let mut s = self.sh();
+        s.likes_revision = s.likes_revision.wrapping_add(1);
+    }
+
+    fn merge_liked_ids(&self, ids: Vec<String>) {
+        let mut likes = self.likes.lock().unwrap();
+        let before = likes.len();
+        likes.extend(ids.into_iter().filter(|id| !self.like_writes.contains_key(id)));
+        let changed = likes.len() != before;
+        drop(likes);
+        if changed { self.likes_changed(); }
+    }
+
+    fn toggle_like(&mut self, t: Track, done: Option<LikeCompleted>) {
         let Some(api) = self.api.clone() else { return };
         let remove = {
             let mut l = self.likes.lock().unwrap();
@@ -1188,11 +1234,13 @@ impl Engine {
             }
             had
         };
-        let (uid, id, tx) = (self.uid.clone(), t.full_id(), self.tx.clone());
+        self.likes_changed();
+        self.like_writes.entry(t.id.clone()).or_insert(LikeWrite { pending: 0, saved: remove }).pending += 1;
+        let (uid, track, tx) = (self.uid.clone(), t.clone(), self.tx.clone());
         let _ = self.bg.send(Box::new(move || {
-            if let Err(e) = api.like(&uid, &id, remove) {
-                let _ = tx.send(Msg::Error(format!("Лайк не сохранился: {e}")));
-            }
+            let result = api.like(&uid, &track.full_id(), remove);
+            if let Some(done) = done { done(&track, !remove, &result); }
+            let _ = tx.send(Msg::LikeFinished { uid, id: track.id, liked: !remove, result });
         }));
         // Лайк трека из волны оригинал сообщает и самой волне, чтобы она его учла.
         if self.session.is_empty() {
@@ -1274,7 +1322,7 @@ impl Engine {
                 self.save_wave();
             }
         }
-        self.likes.lock().unwrap().extend(b.liked);
+        self.merge_liked_ids(b.liked);
         if replace {
             self.queue.clear();
             self.prefetch = None;
@@ -1703,6 +1751,29 @@ mod tests {
         e.handle(rx.recv().unwrap());
         e.sync();
         assert_eq!(player.state().position, 0.0);
+    }
+
+    #[test]
+    fn queued_likes_keep_the_last_saved_state_on_error() {
+        let mut e = Engine::new(mpsc::channel().0, Default::default(), Default::default(), Arc::new(|| {}), Default::default());
+        let (bg, _jobs) = mpsc::channel();
+        e.bg = bg;
+        e.api = Some(Api::new(""));
+        e.uid = "account".into();
+        let track = crate::api::parse_track(&serde_json::json!({"id": 7, "title": "Track"})).unwrap();
+        let reply = |liked, result| Msg::LikeFinished { uid: "account".into(), id: "7".into(), liked, result };
+        e.toggle_like(track.clone(), None);
+        e.toggle_like(track.clone(), None);
+        e.handle(reply(true, Ok(())));
+        assert!(!e.likes.lock().unwrap().contains("7"));
+        e.handle(reply(false, Err("offline".into())));
+        assert!(e.likes.lock().unwrap().contains("7"));
+        e.toggle_like(track, None);
+        e.handle(reply(false, Ok(())));
+        e.handle(Msg::Likes("account".into(), Ok(vec!["7".into(), "9".into()])));
+        let likes = e.likes.lock().unwrap();
+        assert!(!likes.contains("7"));
+        assert!(likes.contains("9"));
     }
 
     /// Сетевой тест: ссылка на поток → скачивание → декодирование (без токена — 30-сек превью).

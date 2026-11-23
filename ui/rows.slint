@@ -100,7 +100,7 @@ export component TrackRow inherits Rectangle {
         width: 40px;
         height: 40px;
         Icon {
-            source: item.liked ? Icons.liked-small : Icons.like-small;
+            source: App.track-liked(item.id, App.likes-revision) ? Icons.liked-small : Icons.like-small;
             size: 20px;
             colorize: like-ta.has-hover ? Theme.controls-color-primary-text-enabled-variant : Theme.controls-color-primary-text-enabled;
         }
@@ -295,7 +295,7 @@ export component AlbumTrackRow inherits Rectangle {
         width: 40px;
         height: 40px;
         Icon {
-            source: item.liked ? Icons.liked-small : Icons.like-small;
+            source: App.track-liked(item.id, App.likes-revision) ? Icons.liked-small : Icons.like-small;
             size: 20px;
             colorize: Theme.controls-color-primary-text-enabled;
         }
