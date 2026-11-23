@@ -78,6 +78,8 @@ pub struct Shared {
     pub playing: bool,
     pub loading: bool,
     pub position: f32,
+    track_generation: u64,
+    seek_request: u64,
     pub duration: f32,
     pub volume: f32,
     pub repeat: Repeat,
@@ -120,6 +122,7 @@ pub enum Cmd {
 
 enum Msg {
     Cmd(Cmd),
+    Seek { seconds: f32, track_generation: u64, request: u64 },
     Account(Res<Account>),
     Likes(Res<Vec<String>>),
     Batch { res: Res<Batch>, replace: bool, gen: u64 },
@@ -156,6 +159,20 @@ impl Player {
 
     pub fn send(&self, c: Cmd) {
         let _ = self.tx.send(Msg::Cmd(c));
+    }
+
+    /// Сразу запоминаем выбранное время, иначе бегунок на миг вернётся к старой позиции.
+    pub fn seek(&self, seconds: f32) -> Option<f32> {
+        let mut s = self.shared.lock().unwrap();
+        if !seconds.is_finite() || s.loading || s.track.is_none() || s.duration <= 0.0 {
+            return None;
+        }
+        let seconds = seconds.clamp(0.0, s.duration);
+        let request = s.seek_request.wrapping_add(1);
+        self.tx.send(Msg::Seek { seconds, track_generation: s.track_generation, request }).ok()?;
+        s.seek_request = request;
+        s.position = seconds;
+        Some(seconds)
     }
 
     pub fn state(&self) -> Shared {
@@ -404,6 +421,7 @@ struct Engine {
     prefetching: Option<String>,
     errors_in_row: u32,
     was_playing: bool,
+    handled_seek: u64,
 }
 
 impl Engine {
@@ -463,6 +481,7 @@ impl Engine {
             prefetching: None,
             errors_in_row: 0,
             was_playing: false,
+            handled_seek: 0,
         }
     }
 
@@ -860,7 +879,9 @@ impl Engine {
         let upcoming: Vec<Track> = self.queue.iter().take(30).cloned().collect();
         let mut s = self.shared.lock().unwrap();
         s.playing = playing;
-        s.position = pos;
+        if s.seek_request == self.handled_seek || s.track.is_none() {
+            s.position = pos;
+        }
         s.volume = self.volume;
         s.repeat = self.repeat;
         s.shuffle = self.shuffle;
@@ -922,6 +943,12 @@ impl Engine {
     fn handle(&mut self, msg: Msg) {
         match msg {
             Msg::Cmd(c) => self.cmd(c),
+            Msg::Seek { seconds, track_generation, request } => {
+                if self.gen == track_generation && self.sh().seek_request == request {
+                    self.cmd(Cmd::Seek(seconds));
+                }
+                self.handled_seek = request;
+            }
             Msg::Account(res) => match res {
                 Ok(acc) => {
                     self.uid = acc.uid.clone();
@@ -1494,6 +1521,7 @@ impl Engine {
         self.feedback("trackStarted", Some(&t), None);
         {
             let mut s = self.sh();
+            s.track_generation = self.gen;
             s.track = Some(t.clone());
             s.position = 0.0;
             s.duration = t.duration_ms as f32 / 1000.0;
@@ -1642,6 +1670,40 @@ impl Engine {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn seek_keeps_latest_position_until_audio_acknowledges_it() {
+        let (tx, rx) = mpsc::channel();
+        let mut e = Engine::new(tx.clone(), Default::default(), Default::default(), Arc::new(|| {}), Default::default());
+        let player = Player { tx, shared: e.shared.clone(), likes: e.likes.clone(), eq: e.eq.clone() };
+        e.loaded = true;
+        e.held_pos = Some(10.0);
+        e.sh().track = crate::api::parse_track(&serde_json::json!({"id": 1, "title": "seek"}));
+        e.sh().duration = 100.0;
+
+        for seconds in [80.0, 20.0] {
+            assert_eq!(player.seek(seconds), Some(seconds));
+            e.sync();
+            assert_eq!(player.state().position, seconds);
+        }
+        e.handle(rx.recv().unwrap());
+        e.sync();
+        assert_eq!(e.held_pos, Some(10.0));
+        assert_eq!(player.state().position, 20.0);
+        e.handle(rx.recv().unwrap());
+        e.sync();
+        assert_eq!(e.held_pos, Some(20.0));
+        e.held_pos = Some(21.0);
+        e.sync();
+        assert_eq!(player.state().position, 21.0);
+
+        player.seek(90.0);
+        e.gen += 1; // Перед обработкой команды начался другой трек.
+        e.held_pos = Some(0.0);
+        e.handle(rx.recv().unwrap());
+        e.sync();
+        assert_eq!(player.state().position, 0.0);
+    }
 
     /// Сетевой тест: ссылка на поток → скачивание → декодирование (без токена — 30-сек превью).
     #[test]

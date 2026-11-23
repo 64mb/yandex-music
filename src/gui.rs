@@ -1684,8 +1684,11 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.on_next(move || p.send(Cmd::Next));
     let p = player.clone();
     app.on_prev(move || p.send(Cmd::Prev));
-    let p = player.clone();
-    app.on_seek(move |s| p.send(Cmd::Seek(s)));
+    app.on_seek(|seconds| with_ctx(|c| {
+        if let Some(position) = c.player.seek(seconds) {
+            c.ui().global::<App>().set_position(position);
+        }
+    }));
     let p = player.clone();
     app.on_like(move || {
         if let Some(t) = p.state().track {

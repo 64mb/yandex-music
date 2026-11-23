@@ -216,9 +216,10 @@ export component PlayerBar inherits Rectangle {
                 root.drag-progress = max(0, min(1, self.mouse-x / root.width));
             }
             if e.button == PointerEventButton.left && e.kind == PointerEventKind.up && root.drag-progress >= 0 {
-                App.seek(root.drag-progress * App.duration);
+                App.seek(root.hover-progress * App.duration);
                 root.drag-progress = -1;
             }
+            if e.kind == PointerEventKind.cancel { root.drag-progress = -1; }
         }
         moved => {
             if self.pressed {
