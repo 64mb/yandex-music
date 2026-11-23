@@ -24,19 +24,6 @@ pub fn scale(w: &slint::Window) -> f32 {
         .unwrap_or(1.0)
 }
 
-pub fn work_area(w: &slint::Window) -> (i32, i32, i32, i32) {
-    w.with_winit_window(|w| {
-        let m = w.current_monitor()?;
-        let (p, s) = (m.position(), m.size());
-        Some((p.x, p.y, p.x + s.width as i32, p.y + s.height as i32))
-    })
-    .flatten()
-    .unwrap_or_else(|| {
-        let s = w.size();
-        (0, 0, s.width as i32, s.height as i32)
-    })
-}
-
 pub fn pick_image(_: &slint::Window, title: &str) -> Option<String> {
     let t = title.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!("POSIX path of (choose file with prompt \"{t}\" of type {{\"public.jpeg\", \"public.png\"}})");

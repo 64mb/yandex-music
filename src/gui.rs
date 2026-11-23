@@ -1233,8 +1233,10 @@ fn quit() {
 /// Обычное окно перед мини-плеером, место плашки и последний размер неразвёрнутого окна.
 #[derive(Default)]
 struct Places {
-    normal: Cell<Option<(Option<slint::PhysicalPosition>, slint::PhysicalSize, bool)>>,
+    normal: Cell<Option<(Option<slint::PhysicalPosition>, Option<slint::PhysicalSize>, bool)>>,
     mini: Cell<Option<slint::PhysicalPosition>>,
+    #[cfg(target_os = "macos")]
+    mini_placement: Cell<Option<crate::config::MiniPlacement>>,
     restored: Cell<Option<slint::PhysicalSize>>,
 }
 
@@ -1245,14 +1247,22 @@ fn window_pos(w: &slint::Window) -> Option<slint::PhysicalPosition> {
 
 fn save_places(ui: &AppWindow, places: &Places) {
     let w = ui.window();
-    if !sys::created(w) || w.is_minimized() {
+    let mini = ui.global::<App>().get_mini();
+    let visible = sys::created(w) && !w.is_minimized();
+    #[cfg(not(target_os = "macos"))]
+    if !visible {
         return;
     }
-    let mini = ui.global::<App>().get_mini();
-    if mini {
+    if mini && visible {
         places.mini.set(window_pos(w).or(places.mini.get()));
+        #[cfg(target_os = "macos")]
+        remember_mini_placement(w, places);
     }
-    let normal = if mini { places.normal.get() } else { Some((window_pos(w), w.size(), w.is_maximized())) };
+    let normal = if mini {
+        places.normal.get()
+    } else {
+        visible.then(|| (window_pos(w), Some(w.size()), w.is_maximized()))
+    };
     with_ctx(|c| {
         let mut st = c.st.borrow_mut();
         let cfg = &mut st.cfg;
@@ -1260,14 +1270,26 @@ fn save_places(ui: &AppWindow, places: &Places) {
             if let Some(p) = pos {
                 cfg.window_pos = Some([p.x, p.y]);
             }
-            if let Some(s) = if max { places.restored.get() } else { Some(size) } {
+            if let Some(s) = if max { places.restored.get() } else { size } {
                 cfg.window_size = Some([s.width, s.height]);
             }
             cfg.window_maximized = max;
         }
         cfg.mini_pos = places.mini.get().map(|p| [p.x, p.y]);
+        #[cfg(target_os = "macos")]
+        {
+            cfg.mini_mode = mini;
+            cfg.mini_placement = places.mini_placement.get();
+        }
         cfg.save();
     });
+}
+
+#[cfg(target_os = "macos")]
+fn remember_mini_placement(window: &slint::Window, places: &Places) {
+    if let Some(placement) = crate::mac_window::mini_placement(window) {
+        places.mini_placement.set(Some(placement));
+    }
 }
 
 /// Вернуть окно на экран, если его монитор с прошлого раза отключили.
@@ -1334,6 +1356,17 @@ fn finish_reveal(weak: slint::Weak<AppWindow>, first: bool, tries: u32) {
                 }
             });
         }
+        #[cfg(target_os = "macos")]
+        if ui.global::<App>().get_mini() {
+            with_ctx(|c| {
+                let state = c.st.borrow();
+                let legacy = state.cfg.mini_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y));
+                crate::mac_window::restore_mini_placement(ui.window(), state.cfg.mini_placement, legacy);
+            });
+        } else {
+            keep_on_screen(ui.window());
+        }
+        #[cfg(not(target_os = "macos"))]
         keep_on_screen(ui.window());
     }
     sys::raise(ui.window());
@@ -1629,8 +1662,6 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     crate::api::ALLOW_EXPLICIT.store(cfg.allow_explicit, Ordering::Relaxed);
     let player = Player::spawn(notifier());
     #[cfg(target_os = "macos")]
-    let _termination_observer = crate::mac_window::observe_termination(&player);
-    #[cfg(target_os = "macos")]
     crate::mac_media::install(&player);
     player.send(Cmd::Volume(cfg.volume));
     if cfg.log_volume {
@@ -1670,17 +1701,26 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.set_hidden_blocks(landing_ui::hidden_titles(&cfg).into());
     let places = Rc::new(Places::default());
     places.mini.set(cfg.mini_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y)));
-    if let Some([w, h]) = cfg.window_size {
-        let size = slint::PhysicalSize::new(w, h);
-        places.restored.set(Some(size));
-        ui.window().set_size(size);
-    }
-    if let Some([x, y]) = cfg.window_pos {
-        ui.window().set_position(slint::PhysicalPosition::new(x, y));
-    }
-    if cfg.window_maximized {
-        ui.window().set_maximized(true);
-        app.set_maximized(true);
+    let normal_pos = cfg.window_pos.map(|[x, y]| slint::PhysicalPosition::new(x, y));
+    let normal_size = cfg.window_size.map(|[w, h]| slint::PhysicalSize::new(w, h));
+    places.restored.set(normal_size);
+    #[cfg(target_os = "macos")]
+    places.mini_placement.set(cfg.mini_placement);
+    if cfg!(target_os = "macos") && cfg.mini_mode {
+        places.normal.set(Some((normal_pos, normal_size, cfg.window_maximized)));
+        app.set_mini(true);
+        ui.window().set_size(slint::LogicalSize::new(400.0, 88.0));
+    } else {
+        if let Some(size) = normal_size {
+            ui.window().set_size(size);
+        }
+        if let Some(pos) = normal_pos {
+            ui.window().set_position(pos);
+        }
+        if cfg.window_maximized {
+            ui.window().set_maximized(true);
+            app.set_maximized(true);
+        }
     }
     let ctx = Rc::new(Ctx {
         ui: ui.as_weak(),
@@ -1931,7 +1971,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         let w = ui.window();
         if !app.get_mini() {
             let was_max = w.is_maximized();
-            pl.normal.set(Some((window_pos(w), w.size(), was_max)));
+            pl.normal.set(Some((window_pos(w), Some(w.size()), was_max)));
             app.set_mini(true);
             app.set_maximized(false);
             // KWin в ответ на set_maximized(false) присылает текущий размер и перебивает размер плашки.
@@ -1958,18 +1998,29 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
                     }
                 });
             }
-            let k = w.scale_factor();
-            let (mw, mh, gap) = ((400.0 * k) as i32, (88.0 * k) as i32, (16.0 * k) as i32);
-            let (l, t, r, b) = sys::work_area(w);
-            let p = pl.mini.get().unwrap_or(slint::PhysicalPosition::new(r - mw - gap, b - mh - gap));
-            w.set_position(slint::PhysicalPosition::new(p.x.min(r - mw).max(l), p.y.min(b - mh).max(t)));
+            #[cfg(target_os = "macos")]
+            crate::mac_window::restore_mini_placement(w, pl.mini_placement.get(), pl.mini.get());
+            #[cfg(not(target_os = "macos"))]
+            {
+                let k = w.scale_factor();
+                let (mw, mh, gap) = ((400.0 * k) as i32, (88.0 * k) as i32, (16.0 * k) as i32);
+                let (l, t, r, b) = sys::work_area(w);
+                let p = pl.mini.get().unwrap_or(slint::PhysicalPosition::new(r - mw - gap, b - mh - gap));
+                w.set_position(slint::PhysicalPosition::new(p.x.min(r - mw).max(l), p.y.min(b - mh).max(t)));
+            }
         } else {
             pl.mini.set(window_pos(w).or(pl.mini.get()));
+            #[cfg(target_os = "macos")]
+            remember_mini_placement(w, &pl);
             app.set_mini(false);
             w.with_winit_window(|ww| ww.set_min_inner_size(Some(LogicalSize::new(960.0, 640.0))));
             match pl.normal.take() {
                 Some((pos, size, max)) => {
-                    w.set_size(if max { pl.restored.get().unwrap_or(size) } else { size });
+                    if let Some(size) = if max { pl.restored.get().or(size) } else { size } {
+                        w.set_size(size);
+                    } else {
+                        w.set_size(slint::LogicalSize::new(1280.0, 800.0));
+                    }
                     if let Some(pos) = pos {
                         w.set_position(pos);
                         // Оконный менеджер X11 может сдвинуть окно, пока применяет новый размер.
@@ -1984,6 +2035,8 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
                             });
                         }
                     }
+                    #[cfg(target_os = "macos")]
+                    crate::mac_window::keep_window_visible(w);
                     if max {
                         w.set_maximized(true);
                         app.set_maximized(true);
@@ -2057,7 +2110,11 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         slint::CloseRequestResponse::KeepWindowShown
     });
 
-    ui.window().on_winit_window_event(|_w, ev| {
+    #[cfg(target_os = "macos")]
+    let mini_window = ui.as_weak();
+    #[cfg(target_os = "macos")]
+    let mini_places = places.clone();
+    ui.window().on_winit_window_event(move |_w, ev| {
         use slint::winit_030::EventResult;
         use winit::event::{ElementState, MouseButton, WindowEvent};
         match ev {
@@ -2080,6 +2137,12 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
                 EventResult::Propagate
             }
             WindowEvent::Moved(_) => {
+                #[cfg(target_os = "macos")]
+                if let Some(ui) = mini_window.upgrade() {
+                    if ui.global::<App>().get_mini() && !ui.window().is_minimized() {
+                        remember_mini_placement(ui.window(), &mini_places);
+                    }
+                }
                 after_move();
                 EventResult::Propagate
             }
@@ -2137,6 +2200,32 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         });
     });
 
+    #[cfg(target_os = "macos")]
+    let _termination_observer = {
+        let ui = ui.as_weak();
+        let places = places.clone();
+        let player = player.clone();
+        crate::mac_window::observe_termination(move || {
+            if let Some(ui) = ui.upgrade() {
+                save_places(&ui, &places);
+            }
+            player.save_playback();
+        })
+    };
+    #[cfg(target_os = "macos")]
+    let _screen_observer = {
+        let ui = ui.as_weak();
+        let places = places.clone();
+        crate::mac_window::observe_screen_changes(move || {
+            if let Some(ui) = ui.upgrade() {
+                let w = ui.window();
+                if ui.global::<App>().get_mini() && sys::created(w) && !w.is_minimized() {
+                    crate::mac_window::restore_mini_placement(w, places.mini_placement.get(), None);
+                    remember_mini_placement(w, &places);
+                }
+            }
+        })
+    };
     if !start_hidden {
         reveal(&ui);
     }

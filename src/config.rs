@@ -59,6 +59,14 @@ pub struct Config {
     pub window_maximized: bool,
     /// Место мини-плеера при выходе.
     pub mini_pos: Option<[i32; 2]>,
+    pub mini_mode: bool,
+    pub mini_placement: Option<MiniPlacement>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct MiniPlacement {
+    pub display: u32,
+    pub offset: [f64; 2],
 }
 
 /// Блок запоминается по id из скелета: он постоянный («recommended_playlists»), а заголовок
@@ -101,6 +109,8 @@ impl Default for Config {
             window_size: None,
             window_maximized: false,
             mini_pos: None,
+            mini_mode: false,
+            mini_placement: None,
         }
     }
 }
