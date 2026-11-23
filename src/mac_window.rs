@@ -5,10 +5,10 @@ use objc2::{
     sel, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSBezelStyle, NSButton, NSImage, NSImageNameExitFullScreenTemplate, NSLayoutAttribute,
-    NSTitlebarAccessoryViewController, NSView,
+    NSAutoresizingMaskOptions, NSBezelStyle, NSButton, NSImage, NSImageNameExitFullScreenTemplate,
+    NSLayoutAttribute, NSTitlebarAccessoryViewController, NSView,
 };
-use objc2_foundation::{NSSize, NSString};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use slint::winit_030::{
     winit::raw_window_handle::{HasWindowHandle, RawWindowHandle},
     WinitWindowAccessor,
@@ -86,8 +86,19 @@ pub fn install_mini_player_button(window: &slint::Window, toggle: impl Fn() + 's
         };
         button.setToolTip(Some(&label));
         button.setBezelStyle(NSBezelStyle::AccessoryBarAction);
-        button.setFrameSize(NSSize::new(34.0, 24.0));
-        accessory.setView(&button);
+        let button_size = NSSize::new(34.0, 24.0);
+        let trailing_padding = 8.0;
+        let container = NSView::initWithFrame(
+            NSView::alloc(mtm),
+            NSRect::new(
+                NSPoint::ZERO,
+                NSSize::new(button_size.width + trailing_padding, button_size.height),
+            ),
+        );
+        button.setFrameSize(button_size);
+        button.setAutoresizingMask(NSAutoresizingMaskOptions::ViewHeightSizable);
+        container.addSubview(&button);
+        accessory.setView(&container);
         accessory.setLayoutAttribute(NSLayoutAttribute::Right);
         window.addTitlebarAccessoryViewController(&accessory);
     });
