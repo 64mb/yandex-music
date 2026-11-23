@@ -288,7 +288,7 @@ impl Drop for ApplicationObserver {
 
 const GET_URL: u32 = u32::from_be_bytes(*b"GURL");
 const DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
-const PLAY_URL: &str = "yamusic-rs://media-play";
+pub(crate) const PLAY_URL: &str = "yamusic-rs://media-play";
 
 define_class!(
     #[unsafe(super = NSObject)]

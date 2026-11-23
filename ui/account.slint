@@ -407,6 +407,15 @@ export component SettingsPage inherits Rectangle {
                 on: App.autostart;
                 clicked => { App.setting("autostart"); }
             }
+            if App.apple-music-agent-available: SettingItem {
+                title: T.t("Открывать Я Музыку вместо Apple Music");
+                desc: App.apple-music-agent-needs-approval
+                    ? T.t("Разрешите фоновый запуск в Системных настройках")
+                    : T.t("Работает и после выхода из Я Музыки");
+                toggle: true;
+                on: App.apple-music-agent-on;
+                clicked => { App.setting("apple-music-agent"); }
+            }
             SettingItem {
                 title: T.t("Проверять обновления");
                 desc: T.t("Раз в полчаса спрашивать GitHub, нет ли новой версии");

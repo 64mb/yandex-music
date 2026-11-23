@@ -20,6 +20,8 @@ mod landing;
 #[cfg(target_os = "macos")]
 mod mac_media;
 #[cfg(target_os = "macos")]
+mod mac_music_agent;
+#[cfg(target_os = "macos")]
 mod mac_window;
 #[cfg(target_os = "linux")]
 mod mpris;
@@ -40,6 +42,21 @@ mod update;
 mod yandex_id;
 
 fn main() -> Result<(), slint::PlatformError> {
+    #[cfg(target_os = "macos")]
+    match std::env::args().nth(1).as_deref() {
+        Some("--apple-music-agent") => {
+            mac_music_agent::run();
+            return Ok(());
+        }
+        Some("--enable-apple-music-agent") => {
+            return mac_music_agent::set_enabled(true).map_err(Into::into);
+        }
+        Some("--disable-apple-music-agent") => {
+            return mac_music_agent::set_enabled(false).map_err(Into::into);
+        }
+        _ => {}
+    }
+
     #[cfg(target_os = "linux")]
     sys::audio_identity();
     // После обновления старая версия ещё закрывается: ждём её до 15 секунд.

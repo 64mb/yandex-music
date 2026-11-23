@@ -25,8 +25,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSButton", "NSButtonCell", "NSControl", "NSGraphics", "NSImage", "NSLayoutConstraint", "NSResponder", "NSScreen", "NSTitlebarAccessoryViewController", "NSView", "NSViewController", "NSWindow", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["block2", "NSAppleEventDescriptor", "NSAppleEventManager", "NSDictionary", "NSNotification", "NSOperation", "NSValue", "NSString", "objc2-core-services"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["block2", "NSApplication", "NSButton", "NSButtonCell", "NSControl", "NSGraphics", "NSImage", "NSLayoutConstraint", "NSResponder", "NSRunningApplication", "NSScreen", "NSTitlebarAccessoryViewController", "NSView", "NSViewController", "NSWindow", "NSWorkspace", "libc", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["block2", "NSAppleEventDescriptor", "NSAppleEventManager", "NSArray", "NSBundle", "NSDictionary", "NSError", "NSNotification", "NSOperation", "NSRunLoop", "NSURL", "NSValue", "NSString", "objc2-core-services"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["block2", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
 
 [target.'cfg(windows)'.dependencies.windows-sys]

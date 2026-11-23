@@ -1358,6 +1358,15 @@ fn reveal(ui: &AppWindow) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn refresh_apple_music_agent(app: &App) {
+    use crate::mac_music_agent::Status;
+    let status = crate::mac_music_agent::status();
+    app.set_apple_music_agent_available(!matches!(status, Status::Unavailable));
+    app.set_apple_music_agent_on(matches!(status, Status::Enabled | Status::RequiresApproval));
+    app.set_apple_music_agent_needs_approval(matches!(status, Status::RequiresApproval));
+}
+
 fn show_window(ui: &AppWindow) -> bool {
     if let Err(e) = ui.show() {
         log(format!("окно не показалось: {e}"));
@@ -1738,6 +1747,8 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.set_allow_explicit(cfg.allow_explicit);
     app.set_linux(cfg!(target_os = "linux"));
     app.set_macos(cfg!(target_os = "macos"));
+    #[cfg(target_os = "macos")]
+    refresh_apple_music_agent(&app);
     app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
     app.set_download_flac(cfg.download_flac);
@@ -2178,6 +2189,13 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 after_dpi_change();
+                EventResult::Propagate
+            }
+            #[cfg(target_os = "macos")]
+            WindowEvent::Focused(true) => {
+                if let Some(ui) = mini_window.upgrade() {
+                    refresh_apple_music_agent(&ui.global::<App>());
+                }
                 EventResult::Propagate
             }
             WindowEvent::Moved(_) => {
@@ -3074,6 +3092,13 @@ impl Ctx {
                 } else {
                     self.toast("Не удалось изменить автозапуск");
                 }
+            }
+            #[cfg(target_os = "macos")]
+            "apple-music-agent" => {
+                if let Err(error) = crate::mac_music_agent::set_enabled(!app.get_apple_music_agent_on()) {
+                    self.toast(format!("Не удалось изменить фоновый запуск: {error}"));
+                }
+                refresh_apple_music_agent(&app);
             }
             "check-updates" => {
                 let on = !app.get_check_updates();

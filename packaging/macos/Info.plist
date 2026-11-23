@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Yandex Music</string>
+    <key>CFBundleDisplayName</key><string>Yandex Music</string>
+    <key>CFBundleIdentifier</key><string>ru.spolzermod.yamusic-rs</string>
+    <key>CFBundleExecutable</key><string>yamusic-rs</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon.icns</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>CFBundleURLName</key><string>ru.spolzermod.yamusic-rs.play</string>
+            <key>CFBundleURLSchemes</key><array><string>yamusic-rs</string></array>
+        </dict>
+    </array>
+</dict>
+</plist>

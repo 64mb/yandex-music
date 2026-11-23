@@ -170,11 +170,9 @@ APK весит около 11 МБ. Играет в фоне, управляет�
 | **Linux** x86_64 | Бета. Нужна glibc 2.35 или новее: Ubuntu 22.04+, Debian 12+, Mint 21+, Fedora, openSUSE, Arch и другие. Проверено на Ubuntu 22.04, Debian 13, Fedora 45 и Arch, в Wayland и X11. Звук через PipeWire, PulseAudio или ALSA. Медиаклавиши и плеер в панели GNOME и KDE работают через MPRIS. Трея пока нет, поэтому закрытие окна закрывает приложение. О проблемах пишите в [issues](https://github.com/SpolzerMod/yamusic-rs/issues). |
 | **Linux** ARM64 | Бета, те же условия, что для x86_64. Проверено на ALT Linux (Asahi) на MacBook Pro M1. |
 | **Android** 8+ arm64 | Бета. Проверено на эмуляторе с Android 15. Шрифты и иконки берутся из установленной Яндекс Музыки, без неё скачиваются с music.yandex.ru. |
-| macOS | Не поддерживается. Есть сторонний порт: [rnikitin/yamusic-rs](https://github.com/rnikitin/yamusic-rs), сборка для Apple Silicon и Intel лежит в его [релизах](https://github.com/rnikitin/yamusic-rs/releases). |
+| **macOS** | Доступен установочный DMG в [релизах форка](https://github.com/64mb/yandex-music/releases). |
 
-> Порт под macOS — отдельный проект. Он основан на коде этого репозитория, но ведётся независимо:
-> этот проект в его разработке не участвует и его сборки не проверяет. За безопасность и работу
-> порта отвечает его автор, вопросы и ошибки по macOS направляйте ему.
+На macOS 13 и новее можно включить «Открывать Я Музыку вместо Apple Music» в настройках. Встроенный фоновый помощник продолжает работать после выхода из плеера. Если macOS запросит разрешение на фоновый запуск, его можно выдать в разделе «Объекты входа и расширения». При переходе со стороннего noTunes отключите его, чтобы оба помощника не обрабатывали один запуск.
 
 **Нужно ещё:**
 - аккаунт Яндекса. Без Плюса сервер отдаёт только 30-секундные отрывки;
@@ -473,10 +471,9 @@ uses about 65 MB in one process.
 - **Android (beta):** install `yamusic-rs-arm64-v8a.apk` from the latest release on Android 8+
   (64-bit). Plays in the background and from the notification shade and lock screen.
 - **Requirements:** Windows 11 (Windows 10 should work but is not tested regularly) or Linux, a Yandex
-  account, and Yandex Plus for full-length tracks. macOS is not supported.
-- **macOS port:** a third-party port is available at [rnikitin/yamusic-rs](https://github.com/rnikitin/yamusic-rs).
-  It is a separate project based on this code. This project does not take part in its development
-  and does not test its builds; its author is responsible for its security and support.
+  account, and Yandex Plus for full-length tracks.
+- **macOS:** download the DMG from the [fork releases](https://github.com/64mb/yandex-music/releases).
+  On macOS 13 and later, a settings switch enables a bundled background agent that opens Yandex Music when Apple Music launches.
 - **Privacy:** the token is encrypted with Windows DPAPI or kept in the Linux keyring (Secret Service)
   and only sent over HTTPS to `yandex.ru` / `yandex.net`. Besides Yandex, the app only talks to
   `api.github.com` (update checks) and the local Discord client (optional status). There is no telemetry.
