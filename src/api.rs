@@ -31,7 +31,7 @@ pub fn pic(uri: &str, size: u32) -> String {
     format!("https://{}", uri.replace("%%", &format!("{size}x{size}")))
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Named {
     pub id: String,
     pub name: String,
@@ -41,14 +41,14 @@ pub struct Named {
     pub cutout: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct PlaylistSlot {
     revision: u64,
     index: usize,
     album: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Track {
     /// Ревизия и серверная позиция строки, выбранной пользователем.
     playlist_slot: Option<Box<PlaylistSlot>>,
@@ -76,7 +76,7 @@ pub struct Track {
 }
 
 /// `trackParameters` из ответа API.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub struct Mood {
     pub hue: f32,

@@ -7,6 +7,7 @@ use crate::config::log;
 use crate::eq::{Eq, EqParams};
 use crate::stream::{Buf, Reader};
 use rodio::{Decoder, OutputStream, Sink, Source as _};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -22,7 +23,7 @@ pub enum Status {
     Failed(String),
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ListKind {
     Playlist,
     Album,
@@ -32,7 +33,7 @@ pub enum ListKind {
 }
 
 /// Что сейчас играет.
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub enum Source {
     #[default]
     Wave,
@@ -49,16 +50,20 @@ impl Source {
             Source::List { .. } => None,
         }
     }
+
+    fn is_trailer(&self) -> bool {
+        matches!(self, Source::List { id, .. } if id.starts_with("trailer:"))
+    }
 }
 
 /// Что играть, когда список закончится.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum After {
     Loop,
     Wave(Source),
 }
 
-#[derive(Clone, Copy, PartialEq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub enum Repeat {
     #[default]
     Off,
@@ -76,6 +81,7 @@ pub struct Shared {
     pub source: Source,
     pub upcoming: Vec<Track>,
     pub playing: bool,
+    pub restored: bool,
     pub likes_revision: i32,
     pub loading: bool,
     pub position: f32,
@@ -125,13 +131,14 @@ pub enum Cmd {
 
 enum Msg {
     Cmd(Cmd),
+    SavePlayback(Sender<()>),
     Seek { seconds: f32, track_generation: u64, request: u64 },
-    Account(Res<Account>),
+    Account { generation: u64, result: Res<Account> },
     Likes(String, Res<Vec<String>>),
     LikeFinished { uid: String, id: String, liked: bool, result: Res<()> },
     Batch { res: Res<Batch>, replace: bool, gen: u64 },
     Audio { gen: u64, res: Res<Audio> },
-    Prefetch { id: String, res: Res<Audio> },
+    Prefetch { generation: u64, id: String, res: Res<Audio> },
     Error(String),
 }
 
@@ -164,6 +171,13 @@ impl Player {
 
     pub fn send(&self, c: Cmd) {
         let _ = self.tx.send(Msg::Cmd(c));
+    }
+
+    pub fn save_playback(&self) {
+        let (tx, rx) = mpsc::channel();
+        if self.tx.send(Msg::SavePlayback(tx)).is_ok() && rx.recv_timeout(Duration::from_secs(1)).is_err() {
+            log("playback.json: аудиопоток не успел сохранить позицию");
+        }
     }
 
     /// Сразу запоминаем выбранное время, иначе бегунок на миг вернётся к старой позиции.
@@ -365,10 +379,51 @@ enum End {
     Restart,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 struct ListPlay {
     deferred: VecDeque<Track>,
     all: Vec<Track>,
     after: After,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Playback {
+    uid: String,
+    source: Source,
+    track: Track,
+    position: f32,
+    queue: VecDeque<Track>,
+    list: Option<ListPlay>,
+    repeat: Repeat,
+    shuffle: bool,
+}
+
+impl Playback {
+    fn path() -> std::path::PathBuf {
+        crate::config::dir().join("playback.json")
+    }
+
+    fn load() -> Option<Self> {
+        serde_json::from_slice(&std::fs::read(Self::path()).ok()?).ok()
+    }
+
+    fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let path = Self::path();
+        let tmp = path.with_extension("json.tmp");
+        let bytes = serde_json::to_vec(self)?;
+        std::fs::create_dir_all(crate::config::dir())?;
+        crate::config::write_private(&tmp, &bytes)?;
+        std::fs::rename(tmp, path)?;
+        Ok(())
+    }
+
+    fn forget() {
+        if let Err(e) = std::fs::remove_file(Self::path()) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log(format!("playback.json: {e}"));
+            }
+        }
+    }
 }
 
 struct Engine {
@@ -392,6 +447,9 @@ struct Engine {
     stall: (f32, Instant),
     api: Option<Api>,
     uid: String,
+    login_generation: u64,
+    playback_started: bool,
+    resume_pos: Option<f32>,
     source: Source,
     list: Option<ListPlay>,
     queue: VecDeque<Track>,
@@ -465,6 +523,9 @@ impl Engine {
             stall: (0.0, Instant::now()),
             api: None,
             uid: String::new(),
+            login_generation: 0,
+            playback_started: false,
+            resume_pos: None,
             source: Source::Wave,
             list: None,
             queue: VecDeque::new(),
@@ -552,6 +613,9 @@ impl Engine {
     }
 
     fn pos(&self) -> f32 {
+        if let Some(pos) = self.resume_pos {
+            return pos;
+        }
         match self.sink() {
             Some(s) => s.get_pos().as_secs_f32(),
             None => self.held_pos.unwrap_or(0.0),
@@ -846,6 +910,7 @@ impl Engine {
         }
         self.loaded = false;
         self.held_pos = None;
+        self.resume_pos = None;
     }
 
     fn clear_queue(&mut self) {
@@ -874,10 +939,14 @@ impl Engine {
         self.current_buf = None;
         self.list = None;
         self.source = Source::Wave;
+        self.paused = true;
+        self.playback_started = false;
+        self.login_generation += 1;
         let mut s = self.sh();
         s.track = None;
         s.source = Source::Wave;
         s.loading = false;
+        s.restored = false;
     }
 
     fn set_source(&mut self, src: Source) {
@@ -888,7 +957,7 @@ impl Engine {
     /// Состояние движка → Shared для UI.
     fn sync(&mut self) {
         let playing = self.loaded && !self.paused && self.sink().map(|s| !s.is_paused()).unwrap_or(false);
-        let pos = if self.loaded { self.pos() } else { 0.0 };
+        let pos = if self.loaded || self.resume_pos.is_some() { self.pos() } else { 0.0 };
         let upcoming: Vec<Track> = self.queue.iter().take(30).cloned().collect();
         let mut s = self.shared.lock().unwrap();
         s.playing = playing;
@@ -956,15 +1025,21 @@ impl Engine {
     fn handle(&mut self, msg: Msg) {
         match msg {
             Msg::Cmd(c) => self.cmd(c),
+            Msg::SavePlayback(done) => {
+                self.save_playback(None);
+                let _ = done.send(());
+            }
             Msg::Seek { seconds, track_generation, request } => {
                 if self.gen == track_generation && self.sh().seek_request == request {
                     self.cmd(Cmd::Seek(seconds));
                 }
                 self.handled_seek = request;
             }
-            Msg::Account(res) => match res {
+            Msg::Account { generation, .. } if generation != self.login_generation => {}
+            Msg::Account { result, .. } => match result {
                 Ok(acc) => {
                     self.uid = acc.uid.clone();
+                    let restored = Playback::load().is_some_and(|saved| self.restore_playback(saved));
                     {
                         let mut s = self.sh();
                         s.status = Status::Ready;
@@ -973,8 +1048,14 @@ impl Engine {
                         s.has_plus = acc.has_plus;
                         s.error = None;
                     }
-                    self.feedback("radioStarted", None, None);
-                    self.fetch_batch();
+                    if restored {
+                        if !self.paused {
+                            self.resume();
+                        }
+                    } else {
+                        self.feedback("radioStarted", None, None);
+                        self.fetch_batch();
+                    }
                     if let Some(api) = self.api.clone() {
                         let tx = self.tx.clone();
                         let uid = acc.uid;
@@ -1030,11 +1111,12 @@ impl Engine {
                     }
                 }
             }
-            Msg::Prefetch { id, res } => {
+            Msg::Prefetch { generation, .. } if generation != self.login_generation => {}
+            Msg::Prefetch { id, res, .. } => {
                 if self.prefetching.as_deref() == Some(id.as_str()) {
                     self.prefetching = None;
                 }
-                let waiting = !self.loaded && self.current.as_ref().map(|t| t.id == id).unwrap_or(false);
+                let waiting = !self.loaded && self.sh().loading && self.current.as_ref().is_some_and(|t| t.id == id);
                 match res {
                     Ok(b) if waiting => self.play_loaded(b),
                     Ok(b) => self.prefetch = Some((id, b)),
@@ -1065,6 +1147,7 @@ impl Engine {
         match c {
             Cmd::Login(token) => {
                 self.reset();
+                self.uid.clear();
                 self.like_writes.clear();
                 self.likes.lock().unwrap().clear();
                 self.likes_changed();
@@ -1076,12 +1159,15 @@ impl Engine {
                     s.error = None;
                 }
                 let tx = self.tx.clone();
+                let generation = self.login_generation;
                 thread::spawn(move || {
-                    let _ = tx.send(Msg::Account(api.account()));
+                    let result = api.account();
+                    let _ = tx.send(Msg::Account { generation, result });
                 });
             }
             Cmd::Logout => {
                 self.reset();
+                Playback::forget();
                 self.api = None;
                 self.uid.clear();
                 self.likes.lock().unwrap().clear();
@@ -1108,9 +1194,13 @@ impl Engine {
                 if let Some(l) = &mut self.listen {
                     l.seek = true;
                 }
-                if self.loaded {
+                if self.resume_pos.is_some() {
+                    self.resume_pos = Some(sec.max(0.0));
+                } else if self.loaded {
                     if let Some(s) = self.sink() {
-                        if let Err(e) = s.try_seek(Duration::from_secs_f32(sec.max(0.0))) {
+                        let position = sec.max(0.0);
+                        self.save_playback(Some(position));
+                        if let Err(e) = s.try_seek(Duration::from_secs_f32(position)) {
                             log(format!("seek: {e:?}"));
                         }
                     } else if self.held_pos.is_some() {
@@ -1271,6 +1361,14 @@ impl Engine {
     fn start_wave(&mut self, src: Source, fetch: bool) {
         // Пропуск уходит ещё в старую волну: clear_queue отправит его туда.
         self.end_current(Some("skip"), true, "other_track");
+        if self.resume_pos.is_some() {
+            self.stop_audio();
+            self.current = None;
+            self.gen += 1;
+            let mut s = self.sh();
+            s.track = None;
+            s.loading = false;
+        }
         self.clear_queue();
         self.list = None;
         self.set_source(src);
@@ -1475,6 +1573,17 @@ impl Engine {
 
     fn resume(&mut self) {
         self.paused = false;
+        self.playback_started = true;
+        if self.resume_pos.is_some() {
+            if !self.sh().loading {
+                self.feedback("radioStarted", None, None);
+                if self.queue.is_empty() {
+                    self.fetch_batch();
+                }
+                self.start_current();
+            }
+            return;
+        }
         if let Some(pos) = self.held_pos.filter(|_| self.loaded && self.audio.is_none()) {
             if !self.restore_at(pos) {
                 self.paused = true;
@@ -1539,6 +1648,12 @@ impl Engine {
     }
 
     fn prev(&mut self) {
+        if self.resume_pos.is_some() {
+            if !self.sh().loading {
+                self.resume_pos = Some(0.0);
+            }
+            return;
+        }
         if self.loaded && self.pos() > 4.0 {
             if let Some(s) = self.sink() {
                 let _ = s.try_seek(Duration::ZERO);
@@ -1579,7 +1694,7 @@ impl Engine {
             let mut s = self.sh();
             s.track_generation = self.gen;
             s.track = Some(t.clone());
-            s.position = 0.0;
+            s.position = self.resume_pos.unwrap_or(0.0);
             s.duration = t.duration_ms as f32 / 1000.0;
             s.loading = true;
         }
@@ -1621,9 +1736,10 @@ impl Engine {
         let Some(api) = self.api.clone() else { return };
         self.prefetching = Some(next.id.clone());
         let tx = self.tx.clone();
+        let generation = self.login_generation;
         thread::spawn(move || {
             let res = load_track(&api, &next);
-            let _ = tx.send(Msg::Prefetch { id: next.id, res });
+            let _ = tx.send(Msg::Prefetch { generation, id: next.id, res });
         });
     }
 
@@ -1632,21 +1748,32 @@ impl Engine {
         if !self.ensure_audio() {
             self.error("Не найдено аудиоустройство");
             self.sh().loading = false;
+            if self.resume_pos.is_some() {
+                self.paused = true;
+            }
             return;
         }
         let src = Ahead::new(Eq::new(src.convert_samples::<f32>(), self.eq.clone()));
         let vol = self.gain();
         let paused = self.paused;
+        let resume_pos = self.resume_pos.unwrap_or(0.0);
         if let Some(sink) = self.sink() {
             sink.clear();
             sink.set_volume(vol);
             sink.append(src);
+            if resume_pos > 0.0 {
+                if let Err(e) = sink.try_seek(Duration::from_secs_f32(resume_pos)) {
+                    self.on_load_error(format!("не удалось восстановить позицию: {e:?}"));
+                    return;
+                }
+            }
             if paused {
                 sink.pause()
             } else {
                 sink.play()
             }
         }
+        self.resume_pos = None;
         self.current_buf = Some(buf);
         self.loaded = true;
         self.held_pos = None;
@@ -1712,6 +1839,11 @@ impl Engine {
         let name = self.current.as_ref().map(|t| t.title.clone()).unwrap_or_default();
         self.error(format!("«{name}» не загрузился: {e}"));
         self.listen = None;
+        if self.resume_pos.is_some() {
+            self.paused = true;
+            self.sh().loading = false;
+            return;
+        }
         if self.errors_in_row < 5 {
             self.current = None;
             self.stop_audio();
@@ -1719,6 +1851,66 @@ impl Engine {
         } else {
             self.sh().loading = false;
         }
+    }
+
+    fn snapshot(&self) -> Option<Playback> {
+        if self.uid.is_empty() || !self.playback_started {
+            return None;
+        }
+        Some(Playback {
+            uid: self.uid.clone(),
+            source: self.source.clone(),
+            track: self.current.clone()?,
+            position: if self.loaded || self.resume_pos.is_some() { self.pos() } else { 0.0 },
+            queue: self.queue.iter().filter(|t| self.list.is_some() || t.batch_id.is_empty()).cloned().collect(),
+            list: self.list.clone(),
+            repeat: self.repeat,
+            shuffle: self.shuffle,
+        })
+    }
+
+    fn save_playback(&self, position: Option<f32>) {
+        if self.source.is_trailer() {
+            return;
+        }
+        if let Some(mut snapshot) = self.snapshot() {
+            if let Some(position) = position {
+                snapshot.position = position;
+            }
+            if let Err(e) = snapshot.save() {
+                log(format!("playback.json: {e}"));
+            }
+        } else if !self.uid.is_empty() && self.playback_started {
+            Playback::forget();
+        }
+    }
+
+    fn restore_playback(&mut self, mut saved: Playback) -> bool {
+        if saved.uid != self.uid || self.current.is_some() || saved.source.is_trailer() || (saved.track.explicit && !crate::api::allow_explicit()) {
+            return false;
+        }
+        if !crate::api::allow_explicit() {
+            saved.queue.retain(|track| !track.explicit);
+        }
+        let duration = saved.track.duration_ms as f32 / 1000.0;
+        let position = if duration > 0.0 { saved.position.clamp(0.0, duration) } else { saved.position.max(0.0) };
+        self.set_source(saved.source);
+        self.queue = saved.queue;
+        self.list = saved.list;
+        self.repeat = saved.repeat;
+        self.shuffle = saved.shuffle;
+        self.resume_pos = Some(position);
+        self.playback_started = true;
+        self.current = Some(saved.track.clone());
+        self.gen += 1;
+        let mut s = self.sh();
+        s.track_generation = self.gen;
+        s.track = Some(saved.track);
+        s.position = position;
+        s.duration = duration;
+        s.loading = false;
+        s.restored = true;
+        true
     }
 }
 
@@ -1759,6 +1951,48 @@ mod tests {
         e.handle(rx.recv().unwrap());
         e.sync();
         assert_eq!(player.state().position, 0.0);
+    }
+
+    #[test]
+    fn saved_playback_reopens_paused_and_play_keeps_the_position() {
+        let engine = || Engine::new(mpsc::channel().0, Default::default(), Default::default(), Arc::new(|| {}), Default::default());
+        let track = |id| crate::api::parse_track(&serde_json::json!({"id": id, "title": "Track", "durationMs": 90_000})).unwrap();
+        let mut previous = engine();
+        previous.uid = "account".into();
+        previous.set_source(Source::List { kind: ListKind::Album, id: "5".into(), title: "Album".into() });
+        previous.current = Some(track(1));
+        previous.queue.push_back(track(2));
+        previous.list = Some(ListPlay { deferred: VecDeque::new(), all: vec![track(1), track(2)], after: After::Loop });
+        previous.playback_started = true;
+        previous.loaded = true;
+        previous.held_pos = Some(46.5);
+        let saved = serde_json::to_vec(&previous.snapshot().unwrap()).unwrap();
+
+        let mut other = engine();
+        other.uid = "other".into();
+        assert!(!other.restore_playback(serde_json::from_slice(&saved).unwrap()));
+        assert!(other.sh().track.is_none());
+
+        let mut reopened = engine();
+        reopened.uid = previous.uid.clone();
+        assert!(reopened.restore_playback(serde_json::from_slice(&saved).unwrap()));
+        reopened.sync();
+        {
+            let state = reopened.sh();
+            assert!(state.restored);
+            assert!(!state.playing);
+            assert!(!state.loading);
+            assert_eq!(state.track.as_ref().unwrap().id, "1");
+            assert_eq!(state.upcoming[0].id, "2");
+            assert_eq!(state.source, previous.source);
+            assert_eq!(state.position, 46.5);
+        }
+        reopened.cmd(Cmd::PlayPause);
+        reopened.sync();
+        assert!(!reopened.paused);
+        assert!(reopened.sh().loading);
+        assert_eq!(reopened.sh().position, 46.5);
+        assert_eq!(reopened.snapshot().unwrap().position, 46.5);
     }
 
     #[test]

@@ -192,7 +192,7 @@ impl Config {
 
 /// На Linux без связки ключей токен лежит открытым текстом, поэтому файл сразу создаётся
 /// только для владельца, а не получает права после записи.
-fn write_private(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create(true).truncate(true);

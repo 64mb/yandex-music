@@ -225,6 +225,9 @@ impl Ctx {
             app.set_discord_status(self.discord.status().into());
         }
         if s.status == Status::Ready && self.st.borrow().net.is_none() {
+            if s.restored {
+                self.st.borrow_mut().started = true;
+            }
             self.on_ready(&s.uid);
         }
 
@@ -1626,6 +1629,8 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     crate::api::ALLOW_EXPLICIT.store(cfg.allow_explicit, Ordering::Relaxed);
     let player = Player::spawn(notifier());
     #[cfg(target_os = "macos")]
+    let _termination_observer = crate::mac_window::observe_termination(&player);
+    #[cfg(target_os = "macos")]
     crate::mac_media::install(&player);
     player.send(Cmd::Volume(cfg.volume));
     if cfg.log_volume {
@@ -2134,6 +2139,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         reveal(&ui);
     }
     let result = slint::run_event_loop_until_quit();
+    player.save_playback();
     #[cfg(target_os = "macos")]
     crate::mac_media::uninstall();
     result?;

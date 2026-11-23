@@ -1,14 +1,18 @@
+use crate::player::Player;
+use block2::RcBlock;
 use objc2::{
     define_class, msg_send,
     rc::Retained,
+    runtime::ProtocolObject,
     runtime::{AnyObject, NSObjectProtocol},
     sel, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSBezelStyle, NSButton, NSImage, NSImageNameExitFullScreenTemplate,
-    NSLayoutAttribute, NSTitlebarAccessoryViewController, NSView,
+    NSApplicationWillTerminateNotification, NSAutoresizingMaskOptions, NSBezelStyle, NSButton,
+    NSImage, NSImageNameExitFullScreenTemplate, NSLayoutAttribute,
+    NSTitlebarAccessoryViewController, NSView,
 };
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
 use slint::winit_030::{
     winit::raw_window_handle::{HasWindowHandle, RawWindowHandle},
     WinitWindowAccessor,
@@ -102,4 +106,32 @@ pub fn install_mini_player_button(window: &slint::Window, toggle: impl Fn() + 's
         accessory.setLayoutAttribute(NSLayoutAttribute::Right);
         window.addTitlebarAccessoryViewController(&accessory);
     });
+}
+
+pub struct TerminationObserver {
+    center: Retained<NSNotificationCenter>,
+    token: Retained<ProtocolObject<dyn NSObjectProtocol>>,
+}
+
+pub fn observe_termination(player: &Player) -> TerminationObserver {
+    let center = NSNotificationCenter::defaultCenter();
+    let player = player.clone();
+    let handler = RcBlock::new(move |_| player.save_playback());
+    // the notification runs synchronously before AppKit exits the process
+    let token = unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(NSApplicationWillTerminateNotification),
+            None,
+            None,
+            &handler,
+        )
+    };
+    TerminationObserver { center, token }
+}
+
+impl Drop for TerminationObserver {
+    fn drop(&mut self) {
+        let token: &ProtocolObject<dyn NSObjectProtocol> = &self.token;
+        unsafe { self.center.removeObserver(token.as_ref()) };
+    }
 }
