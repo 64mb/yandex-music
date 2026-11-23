@@ -1642,6 +1642,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
     app.set_check_updates(cfg.check_updates);
     app.set_allow_explicit(cfg.allow_explicit);
     app.set_linux(cfg!(target_os = "linux"));
+    app.set_macos(cfg!(target_os = "macos"));
     app.set_translations(crate::i18n::available());
     app.set_download_dir(music_dir(&cfg).display().to_string().into());
     app.set_download_flac(cfg.download_flac);
@@ -2024,6 +2025,7 @@ pub fn run(start_hidden: bool) -> Result<(), slint::PlatformError> {
         sys::on_wake(move || {
             let _ = weak.upgrade_in_event_loop(|ui| reveal(&ui));
         });
+        #[cfg(target_os = "linux")]
         install_mpris(&ui, &player);
     }
     // Alt+F4 и закрытие из панели задач: Slint сам только прячет окно, а процесс остаётся жить.

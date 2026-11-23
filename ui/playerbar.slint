@@ -258,7 +258,7 @@ export component MiniPlayer inherits Rectangle {
 
     ta := TouchArea {
         pointer-event(e) => {
-            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+            if !App.macos && e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
                 App.drag-window();
             }
         }
